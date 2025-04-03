@@ -14,9 +14,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 
-/**
- * Created by Niraj on 18-08-2022.
- */
 class SensorPacketsProvider : SensorEventListener {
 
 
@@ -152,7 +149,6 @@ class SensorPacketsProvider : SensorEventListener {
 
                 }
             }
-
 
         }
 

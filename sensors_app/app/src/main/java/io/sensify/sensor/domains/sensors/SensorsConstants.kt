@@ -106,7 +106,6 @@ object SensorsConstants {
             put(Sensor.TYPE_HEART_RATE, 1) //21
             put(
                 Sensor.TYPE_RELATIVE_HUMIDITY, 1)// 12
-
         }
     }
 
@@ -160,8 +159,6 @@ object SensorsConstants {
                 Sensor.TYPE_GYROSCOPE_UNCALIBRATED -> true
                 else -> false
             }
-
-
         return hasUnitValue;
     }
 
@@ -187,16 +184,6 @@ object SensorsConstants {
         }
 
         return builder;
-    }
-
-    private fun getSquaredText(text: String, supText: String): Spanned {
-        val result: Spanned
-        result = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            Html.fromHtml("$text<sup><small>$supText</small></sup>", Html.FROM_HTML_MODE_LEGACY)
-        } else {
-            Html.fromHtml("$text<sup><small>$supText</small></sup>")
-        }
-        return result
     }
 
     private fun getSquaredText(builder: AnnotatedString.Builder, text: String, supText: String): AnnotatedString.Builder {

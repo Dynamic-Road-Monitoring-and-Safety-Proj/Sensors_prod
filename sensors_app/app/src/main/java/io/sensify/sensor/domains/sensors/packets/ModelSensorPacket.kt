@@ -2,9 +2,6 @@ package io.sensify.sensor.domains.sensors.packets
 
 import android.hardware.SensorEvent
 
-/**
- * Created by Niraj on 19-08-2022.
- */
 data class ModelSensorPacket(
     /** some reference issue with this */
     var sensorEvent: SensorEvent? = null,

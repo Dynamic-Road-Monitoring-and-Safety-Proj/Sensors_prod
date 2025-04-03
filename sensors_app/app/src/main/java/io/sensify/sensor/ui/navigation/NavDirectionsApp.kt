@@ -29,7 +29,7 @@ fun NavGraphApp() {
     val navController = rememberNavController()
 
     NavHost(navController = navController, startDestination = NavDirectionsApp.Splash.route) {
-        // startDestination "labs1"
+//        startDestination "labs1"
 //        val viewModelHome: HomeViewModel = HomeViewModel()
 //        val viewModelSensor: SensorViewModel = SensorViewModel()
         composable(NavDirectionsApp.Splash.route) { SplashPage(navController) }
@@ -38,6 +38,7 @@ fun NavGraphApp() {
                 navController = navController
             )
         }
+
         composable("${NavDirectionsApp.SensorDetailPage.route}/{type}", listOf(navArgument("type") {
             type = NavType.IntType
         })) {
