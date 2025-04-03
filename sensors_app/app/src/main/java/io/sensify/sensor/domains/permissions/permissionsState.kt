@@ -9,10 +9,6 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.google.accompanist.permissions.MultiplePermissionsState
 import com.google.accompanist.permissions.isGranted
 
-/**
- * Created by Niraj on 12-08-2022.
- */
-
 interface PermissionsState {
     val isGranted: Boolean
     fun requestManually(): Unit

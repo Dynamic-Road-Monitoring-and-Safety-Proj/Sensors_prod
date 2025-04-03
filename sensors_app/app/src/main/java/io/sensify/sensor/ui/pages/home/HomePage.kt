@@ -16,6 +16,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.AddChart
 import androidx.compose.material.icons.rounded.Info
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.*
@@ -79,6 +80,8 @@ fun HomePage(
     val pagerState = rememberPagerState(
 //        pageCount = 3,
     )
+
+
 
 //    Log.d("HomePage", "sensor ${sensorsUiState.value.sensors}");
 
@@ -172,12 +175,14 @@ fun HomePage(
                         Icon(Icons.Rounded.Info, "about")
                     }
 
+                    ToggleableFAB(viewModel)
                     // Video Recording Button
                     FloatingActionButton(
                         onClick = { viewModel.toggleVideoRecording() },
                         shape = RoundedCornerShape(50),
                         containerColor = Color.Red,
                         modifier = Modifier
+                            .padding(bottom = 16.dp)
                             .background(
                                 brush = Brush.linearGradient(
                                     colors = listOf(Color.Red.copy(alpha = 0.8f), Color.Red.copy(alpha = 0.5f))
@@ -225,42 +230,42 @@ fun HomePage(
 
             }
             // Header
-            item {
-                Box(
-                    modifier = Modifier.padding(
-                        start = JlResDimens.dp32,
-                        end = JlResDimens.dp32
-                    ),
-                ) {
-                    HomeHeader(
-                        sensorUiState.value.currentSensor,
-                        totalActive = sensorUiState.value.activeSensorCounts,
-                        onClickArrow = { isLeft ->
-
-
-                            var currentPage = pagerState.currentPage
-                            var totalPage = pagerState.pageCount
-
-                            if (!isLeft && currentPage + 1 < totalPage) {
-                                coroutineScope.launch {
-                                    pagerState.animateScrollToPage(currentPage + 1)
-                                }
-                            } else if (isLeft && currentPage > 0 && totalPage > 0) {
-                                coroutineScope.launch {
-                                    pagerState.animateScrollToPage(currentPage - 1)
-                                }
-                            }
-                        }
-                    )
-                }
-            }
-            // Plotting area
-            item {
-//                Spacer(modifier = Modifier.height(JlResDimens.dp350))
-
-                HomeSensorGraphPager(viewModel = viewModel, pagerState = pagerState)
-
-            }
+//            item {
+//                Box(
+//                    modifier = Modifier.padding(
+//                        start = JlResDimens.dp32,
+//                        end = JlResDimens.dp32
+//                    ),
+//                ) {
+//                    HomeHeader(
+//                        sensorUiState.value.currentSensor,
+//                        totalActive = sensorUiState.value.activeSensorCounts,
+//                        onClickArrow = { isLeft ->
+//
+//
+//                            var currentPage = pagerState.currentPage
+//                            var totalPage = pagerState.pageCount
+//
+//                            if (!isLeft && currentPage + 1 < totalPage) {
+//                                coroutineScope.launch {
+//                                    pagerState.animateScrollToPage(currentPage + 1)
+//                                }
+//                            } else if (isLeft && currentPage > 0 && totalPage > 0) {
+//                                coroutineScope.launch {
+//                                    pagerState.animateScrollToPage(currentPage - 1)
+//                                }
+//                            }
+//                        }
+//                    )
+//                }
+//            }
+//            // Plotting area
+//            item {
+////                Spacer(modifier = Modifier.height(JlResDimens.dp350))
+//
+//                HomeSensorGraphPager(viewModel = viewModel, pagerState = pagerState)
+//
+//            }
 
             // Available Sensors
             item {
@@ -347,5 +352,39 @@ fun HomePage(
             item { Spacer(modifier = Modifier.height(JlResDimens.dp16)) }
 //            }
         }
+
+    }
+}
+@Composable
+fun ToggleableFAB(viewModel: HomeViewModel) {
+    var isLogging by remember { mutableStateOf(false) }
+
+    FloatingActionButton(
+        onClick = {
+            isLogging = !isLogging  // Toggle state
+            viewModel.toggleCsvLogging()
+        },
+        shape = RoundedCornerShape(50),
+        containerColor = if (isLogging) Color(0xFF800080) else Color.Yellow, // Purple when active
+        modifier = Modifier
+            .padding(bottom = 16.dp)
+            .background(
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        if (isLogging) Color.Magenta.copy(alpha = 0.8f) else Color.Red.copy(alpha = 0.8f),
+                        if (isLogging) Color.Magenta.copy(alpha = 0.5f) else Color.Red.copy(alpha = 0.5f)
+                    )
+                ),
+                shape = RoundedCornerShape(50.dp)
+            )
+            .border(
+                brush = Brush.verticalGradient(
+                    listOf(Color.Black.copy(alpha = 0.1f), Color.Black.copy(alpha = 0.3f))
+                ),
+                width = JlResDimens.dp1,
+                shape = RoundedCornerShape(50.dp)
+            )
+    ) {
+        Icon(Icons.Rounded.AddChart, "Record CSV", tint = Color.White)
     }
 }

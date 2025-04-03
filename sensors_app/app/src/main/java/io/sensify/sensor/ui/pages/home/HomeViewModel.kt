@@ -2,6 +2,7 @@ package io.sensify.sensor.ui.pages.home
 
 import android.hardware.Sensor
 import android.hardware.SensorManager
+import android.os.Environment
 import android.util.Log
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -10,6 +11,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import io.sensify.sensor.domains.chart.entity.ModelChartUiUpdate
 import io.sensify.sensor.domains.chart.mpchart.MpChartDataManager
+import io.sensify.sensor.domains.sensors.SensorsConstants
 import io.sensify.sensor.domains.sensors.packets.SensorPacketConfig
 import io.sensify.sensor.domains.sensors.packets.SensorPacketsProvider
 import io.sensify.sensor.domains.sensors.provider.SensorsProvider
@@ -17,10 +19,12 @@ import io.sensify.sensor.ui.pages.home.model.ModelHomeSensor
 import io.sensify.sensor.ui.pages.home.state.HomeUiState
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import java.io.BufferedWriter
+import java.io.File
+import java.io.FileWriter
+import kotlin.math.log
 
-/**
- * Created by Niraj on 08-10-2022.
- */
+
 class HomeViewModel : ViewModel() {
 
 //    private var mLogTimestamp: Long = 0
@@ -120,6 +124,77 @@ class HomeViewModel : ViewModel() {
         }
     }
 
+    // Logging to CSV
+
+    private var csvFile: File? = null
+    private var writer: BufferedWriter? = null
+    private var isLogging = MutableStateFlow(false)
+    private fun startCsvLogging() {
+        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        if (!dir.exists()) dir.mkdirs() // Ensure directory exists
+
+        csvFile = File(dir, "sensor_data.csv")
+        val isNewFile = !csvFile!!.exists()
+
+        writer = BufferedWriter(FileWriter(csvFile, true)) // Append mode
+        if (isNewFile) {
+            val header = StringBuilder("Date,Timestamp,SensorType")
+
+            var maxAxisCount = 3
+            for (i in 0 until SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.size()) {
+                val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.valueAt(i)
+                if (axisCount > maxAxisCount) {
+                    maxAxisCount = axisCount
+                }
+            }
+            for (i in 0 until maxAxisCount) {
+                header.append(",Value${i+1}")
+            }
+            header.append("\n")
+            writer?.write(header.toString())
+        }
+
+        isLogging.value = true
+        Log.d("CSV", "Logging Started: ${csvFile?.absolutePath}")
+    }
+
+    private fun stopCsvLogging() {
+        isLogging.value = false
+        writer?.flush()
+        writer?.close()
+        Log.d("CSV", "Logging Stopped")
+    }
+    private fun logSensorData(sensorType: Int, values: FloatArray?) {
+        if (isLogging.value && values != null) {
+            val timestamp = System.currentTimeMillis()
+            val sensorName = SensorsConstants.MAP_TYPE_TO_NAME[sensorType] ?: "Unknown"
+            val valuesString = values.joinToString(",") { String.format("%.6f", it) }
+            val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT[sensorType] ?: 1
+
+            val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd,HH:mm:ss.SSS", java.util.Locale.getDefault())
+            val formattedDate = dateFormat.format(java.util.Date(timestamp))
+
+            val csvLine = StringBuilder()
+            csvLine.append("$formattedDate,$sensorName")
+
+            for (i in 0 until axisCount) {
+                csvLine.append(",${if (i < values.size) values[i] else ""}")
+            }
+
+            csvLine.append("\n")
+
+            writer?.write(csvLine.toString())
+            writer?.flush()
+
+            Log.d("CSV", "Logging: $csvLine")
+        }
+    }
+
+
+    fun toggleCsvLogging() {
+        if (isLogging.value) stopCsvLogging() else startCsvLogging()
+    }
+
     private fun initializeFlow() {
 
         var sensorPacketFlow =
@@ -128,6 +203,7 @@ class HomeViewModel : ViewModel() {
         for (sensor in _mActiveSensorList) {
             attachPacketListener(sensor);
         }
+
 
         viewModelScope.launch {
             sensorPacketFlow.collect {
@@ -140,6 +216,7 @@ class HomeViewModel : ViewModel() {
                  }*/
 
 //                mLogTimestamp = it.timestamp
+                logSensorData(it.type, it.values)
                 mChartDataManagerMap[it.type]?.addEntry(it)
 //                mChartDataManager?.addEntry(it)
             }
