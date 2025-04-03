@@ -76,7 +76,6 @@ fun HomeSensorChartItem(
             modifier = Modifier.padding(horizontal = JlResDimens.dp12),
             text = "${modelSensor.name}",
 
-
             color = MaterialTheme.colorScheme.onSurface,
             textAlign = TextAlign.Start,
             style = JlResTxtStyles.h5,
@@ -86,7 +85,6 @@ fun HomeSensorChartItem(
                 .background(color = Color.Transparent)
 //            .height(JlResDimens.dp168)
                 .fillMaxSize(),
-
 
             factory = { ctx ->
 

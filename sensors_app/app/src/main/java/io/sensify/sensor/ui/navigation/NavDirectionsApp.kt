@@ -12,10 +12,6 @@ import io.sensify.sensor.ui.pages.about.AboutPage
 import io.sensify.sensor.ui.pages.home.HomePage
 import io.sensify.sensor.ui.pages.sensor.details.SensorPage
 
-
-/**
- * Created by Niraj on 30-08-2022.
- */
 sealed class NavDirectionsApp(val route: String) {
     object Root : NavDirectionsApp("root")
     object HomePage : NavDirectionsApp("home_page")

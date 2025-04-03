@@ -49,9 +49,6 @@ import io.sensify.sensor.ui.resource.values.JlResShapes
 import io.sensify.sensor.ui.resource.values.JlResTxtStyles
 import kotlinx.coroutines.launch
 
-/**
- * Created by Niraj on 26-09-2022.
- */
 @OptIn(
     ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalTextApi::class,
     ExperimentalPagerApi::class, ExperimentalAnimationApi::class
@@ -65,7 +62,6 @@ fun HomePage(
     )
 
 ) {
-
     val coroutineScope = rememberCoroutineScope()
     val lazyListState = rememberLazyListState()
 //    val sensorsProvider = SensorsProviderComposable()
@@ -323,13 +319,11 @@ fun HomePage(
 
                                     onCheckChange = { type: Int, isChecked: Boolean ->
                                         viewModel.onSensorChecked(type, isChecked)
-
                                     },
                                     onClick = {
                                         navController?.navigate("${NavDirectionsApp.SensorDetailPage.route}/${it}")
                                     }
                                 )
-
                             }
 
                             if (i < item.size - 1) {
@@ -338,7 +332,6 @@ fun HomePage(
                         }
                         if (item.size % 2 != 0) {
                             Spacer(modifier = Modifier.width(JlResDimens.dp8))
-
                             Box(
                                 modifier = Modifier
                                     .weight(1f)

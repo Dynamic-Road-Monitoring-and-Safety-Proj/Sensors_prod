@@ -118,14 +118,12 @@ class HomeViewModel : ViewModel() {
 //            Log.d("HomeViewModel", "getInitialChartData")
             getChartDataManager(sensor.type)
         }
-
     }
 
     private fun initializeFlow() {
 
         var sensorPacketFlow =
             SensorPacketsProvider.getInstance().mSensorPacketFlow
-
 
         for (sensor in _mActiveSensorList) {
             attachPacketListener(sensor);
