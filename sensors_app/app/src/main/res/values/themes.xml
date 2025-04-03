@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+<!--    <style name="Theme.SensifyAndroid" parent="android:Theme.Material.Light.NoActionBar">-->
+<!--        <item name="android:statusBarColor">@color/purple_700</item>-->
+<!--    </style>-->
+
+    <!-- Base application theme. -->
+
+    <style name="Theme.SensifyAndroid" parent="Theme.Material3.DayNight.NoActionBar" >
+
+        <item name="colorPrimary">@color/white</item>
+        <item name="colorPrimaryVariant">@color/white</item>
+        <item name="colorOnPrimary">@color/black</item>
+    </style>
+
+    <style name="Theme.SensifyAndroid.Splash">
+        <item name="android:statusBarColor">@color/background_color</item>
+        <item name="android:windowBackground">@drawable/splash_screen_background</item>
+        <item name="android:navigationBarColor">@color/background_color</item>
+
+    </style>
+
+</resources>
