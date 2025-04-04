@@ -1,5 +1,9 @@
 package io.sensor_prod.sensor.ui.pages.home
 
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.VideoCapture
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.scaleIn
@@ -51,9 +55,26 @@ fun HomePage(
     viewModel: HomeViewModel = viewModel(
         factory = HomeViewModel.Factory()
     )
-
 ) {
+    val camVM: CameraViewModel = viewModel(
+        factory = CameraViewModel.Factory()
+    )
+    LaunchedEffect(Unit) {
+        // Set up VideoCapture
+        val recorder = Recorder.Builder()
+            .setQualitySelector(QualitySelector.fromOrderedList(
+                listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
+            ))
+            .build()
+        val videoCapture = VideoCapture.withOutput(recorder)
+
+        // Initialize the ViewModel
+        camVM.initialize(context, videoCapture)
+    }
+
     val coroutineScope = rememberCoroutineScope()
+
+
     val lazyListState = rememberLazyListState()
 //    val sensorsProvider = SensorsProviderComposable()
 //    val sensors = remember { sensorsProvider }
@@ -315,6 +336,12 @@ fun HomePage(
 
     }
 }
+
+@Composable
+fun Factory() {
+    TODO("Not yet implemented")
+}
+
 @Composable
 fun ToggleableFAB(viewModel: HomeViewModel) {
     var isLogging by remember { mutableStateOf(false) }
