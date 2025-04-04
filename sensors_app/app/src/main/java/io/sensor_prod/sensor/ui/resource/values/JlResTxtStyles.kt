@@ -4,11 +4,8 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import io.sensor_prod.sensor.R
+import io.sensify.sensor.R
 
-/**
- * Created by Niraj on 05-08-2022.
- */
 object JlResTxtStyles {
 
     private val fontsJost = FontFamily(

@@ -33,10 +33,6 @@ import io.sensor_prod.sensor.ui.resource.themes.JlThemeM3
 import io.sensor_prod.sensor.ui.resource.values.JlResDimens
 import io.sensor_prod.sensor.ui.resource.values.JlResTxtStyles
 
-/**
- * Created by Niraj on 26-09-2022.
- */
-
 @Preview(showBackground = true, backgroundColor = 0xFF041B11)
 @Composable
 fun HomeHeader(
