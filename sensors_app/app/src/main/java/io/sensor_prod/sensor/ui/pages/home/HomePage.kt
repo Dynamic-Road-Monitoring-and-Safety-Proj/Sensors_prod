@@ -1,5 +1,9 @@
 package io.sensor_prod.sensor.ui.pages.home
 
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.VideoCapture
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.scaleIn
@@ -12,14 +16,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddChart
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -51,9 +55,26 @@ fun HomePage(
     viewModel: HomeViewModel = viewModel(
         factory = HomeViewModel.Factory()
     )
-
 ) {
+    val camVM: CameraViewModel = viewModel(
+        factory = CameraViewModel.Factory()
+    )
+    LaunchedEffect(Unit) {
+        // Set up VideoCapture
+        val recorder = Recorder.Builder()
+            .setQualitySelector(QualitySelector.fromOrderedList(
+                listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
+            ))
+            .build()
+        val videoCapture = VideoCapture.withOutput(recorder)
+
+        // Initialize the ViewModel
+        camVM.initialize(context, videoCapture)
+    }
+
     val coroutineScope = rememberCoroutineScope()
+
+
     val lazyListState = rememberLazyListState()
 //    val sensorsProvider = SensorsProviderComposable()
 //    val sensors = remember { sensorsProvider }
@@ -77,7 +98,7 @@ fun HomePage(
 
     Scaffold(topBar = {
 
-        SmallTopAppBar(
+        TopAppBar(
 
 //            backgroundColor = Color.Transparent,
             colors = if (!isAtTop.value) TopAppBarDefaults.mediumTopAppBarColors(
@@ -168,7 +189,7 @@ fun HomePage(
         LazyColumn(
 
             modifier = Modifier
-                .consumedWindowInsets(it)
+                .consumeWindowInsets(it)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
@@ -315,6 +336,12 @@ fun HomePage(
 
     }
 }
+
+@Composable
+fun Factory() {
+    TODO("Not yet implemented")
+}
+
 @Composable
 fun ToggleableFAB(viewModel: HomeViewModel) {
     var isLogging by remember { mutableStateOf(false) }
