@@ -54,15 +54,16 @@ class MainActivity : ComponentActivity() {
                         .forPurpose(PermissionsRequest.PURPOSE_DETAIL)
                         .runAtStart(true)
 
-                    RememberPermissionManager(permissionRequest) { isGranted ->
-                        hasPermissions = Environment.isExternalStorageManager()
+                    val permissionState = RememberPermissionManager(permissionRequest) { isGranted ->
+                        hasPermissions = isGranted
                         Log.d("MainActivity", "Permissions granted: $isGranted")
+
+                        // If regular permissions granted but still need storage access
+                        if (isGranted && !Environment.isExternalStorageManager()) {
+                            requestStoragePermission()
+                        }
                     }
-                    if (Environment.isExternalStorageManager()) {
                         NavGraphApp()
-                    } else {
-                        requestStoragePermission()
-                    }
                 }
             }
         }

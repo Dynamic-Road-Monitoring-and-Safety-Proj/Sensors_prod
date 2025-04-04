@@ -41,11 +41,9 @@ fun HomeHeader(
     }
 ) {
 
-
     Box(
         modifier = Modifier
             .fillMaxWidth()
-
             .clip(RoundedCornerShape(JlResDimens.dp18))
             .background(
                 brush = Brush.linearGradient(

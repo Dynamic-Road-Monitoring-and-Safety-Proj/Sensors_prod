@@ -359,7 +359,6 @@ class HomeViewModel : ViewModel() {
 
             }
         }
-
     }
 
     override fun onCleared() {
@@ -368,8 +367,8 @@ class HomeViewModel : ViewModel() {
 //        Log.d("HomeViewModel", "onCleared")
         mChartDataManagerMap.forEach { (_, mpChartDataManager) -> mpChartDataManager.destroy() }
     }
-    private var isRecording = MutableStateFlow(false)
 
+    private var isRecording = MutableStateFlow(false)
     fun toggleVideoRecording() {
         if (isRecording.value) {
             stopRecording()
@@ -389,13 +388,10 @@ class HomeViewModel : ViewModel() {
         Log.d("Video", "Recording Stopped")
     }
 
-
     @Suppress("UNCHECKED_CAST")
     class Factory() : ViewModelProvider.Factory {
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
             return HomeViewModel() as T
         }
     }
-
-
 }

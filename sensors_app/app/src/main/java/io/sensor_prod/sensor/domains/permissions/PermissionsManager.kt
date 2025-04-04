@@ -74,11 +74,16 @@ interface PermissionsRequest {
         @RequiresApi(Build.VERSION_CODES.S)
         private val PERMISSIONS_MAP = mapOf(
             PURPOSE_DETAIL to listOf(
-                Manifest.permission.CAMERA,Manifest.permission.MANAGE_MEDIA,
-//                Manifest.permission.HIGH_SAMPLING_RATE_SENSORS,
-//                Manifest.permission.MANAGE_MEDIA,
-//                Manifest.permission.WRITE_EXTERNAL_STORAGE
-            ),
+                Manifest.permission.CAMERA,
+                Manifest.permission.MANAGE_MEDIA,
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.RECORD_AUDIO,
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.HIGH_SAMPLING_RATE_SENSORS,
+                Manifest.permission.MANAGE_EXTERNAL_STORAGE
+            )
+            ,
             PURPOSE_SENSOR_STEP_COUNTER to listOf(
                 Manifest.permission.ACTIVITY_RECOGNITION
             )
