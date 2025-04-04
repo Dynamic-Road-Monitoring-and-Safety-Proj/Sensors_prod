@@ -12,14 +12,14 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AddChart
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
@@ -77,7 +77,7 @@ fun HomePage(
 
     Scaffold(topBar = {
 
-        SmallTopAppBar(
+        TopAppBar(
 
 //            backgroundColor = Color.Transparent,
             colors = if (!isAtTop.value) TopAppBarDefaults.mediumTopAppBarColors(
@@ -168,7 +168,7 @@ fun HomePage(
         LazyColumn(
 
             modifier = Modifier
-                .consumedWindowInsets(it)
+                .consumeWindowInsets(it)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
