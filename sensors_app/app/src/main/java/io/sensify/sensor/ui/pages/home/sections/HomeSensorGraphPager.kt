@@ -26,9 +26,6 @@ import io.sensify.sensor.ui.resource.effects.drawColoredShadow
 import io.sensify.sensor.ui.resource.values.JlResDimens
 import kotlin.math.absoluteValue
 
-/**
- * Created by Niraj on 29-09-2022.
- */
 @OptIn(ExperimentalPagerApi::class)
 @Preview(showBackground = true, backgroundColor = 0xFF041B11)
 @Composable

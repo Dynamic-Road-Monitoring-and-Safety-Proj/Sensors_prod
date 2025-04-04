@@ -1,5 +1,6 @@
 package io.sensify.sensor.ui.pages.home
 
+import android.annotation.SuppressLint
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.os.Environment
@@ -23,6 +24,7 @@ import java.io.BufferedWriter
 import java.io.File
 import java.io.FileWriter
 import kotlin.math.log
+import androidx.core.util.size
 
 
 class HomeViewModel : ViewModel() {
@@ -141,7 +143,7 @@ class HomeViewModel : ViewModel() {
             val header = StringBuilder("Date,Timestamp,SensorType")
 
             var maxAxisCount = 3
-            for (i in 0 until SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.size()) {
+            for (i in 0 until SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.size) {
                 val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.valueAt(i)
                 if (axisCount > maxAxisCount) {
                     maxAxisCount = axisCount
@@ -164,12 +166,13 @@ class HomeViewModel : ViewModel() {
         writer?.close()
         Log.d("CSV", "Logging Stopped")
     }
+    @SuppressLint("DefaultLocale")
     private fun logSensorData(sensorType: Int, values: FloatArray?) {
         if (isLogging.value && values != null) {
             val timestamp = System.currentTimeMillis()
             val sensorName = SensorsConstants.MAP_TYPE_TO_NAME[sensorType] ?: "Unknown"
             val valuesString = values.joinToString(",") { String.format("%.6f", it) }
-            val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT[sensorType] ?: 1
+            val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT[sensorType]
 
             val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd,HH:mm:ss.SSS", java.util.Locale.getDefault())
             val formattedDate = dateFormat.format(java.util.Date(timestamp))

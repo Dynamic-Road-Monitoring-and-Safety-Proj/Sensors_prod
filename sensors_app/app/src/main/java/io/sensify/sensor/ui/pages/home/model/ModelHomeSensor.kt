@@ -3,9 +3,6 @@ package io.sensify.sensor.ui.pages.home.model
 import android.hardware.Sensor
 import io.sensify.sensor.domains.sensors.SensorsConstants
 
-/**
- * Created by Niraj on 08-10-2022.
- */
 data class ModelHomeSensor(
     var type: Int = -1,
     var sensor: Sensor? = null,

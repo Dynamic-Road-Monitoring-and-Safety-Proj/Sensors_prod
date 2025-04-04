@@ -6,6 +6,7 @@ import android.hardware.SensorManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
@@ -58,17 +59,14 @@ class MainActivity : ComponentActivity() {
                         .runAtStart(true)
 
                     RememberPermissionManager(permissionRequest) { isGranted ->
-                        hasPermissions = isGranted
+                        hasPermissions = Environment.isExternalStorageManager()
                         Log.d("MainActivity", "Permissions granted: $isGranted")
                     }
-//                    requestStoragePermission()
-                    NavGraphApp()
-
-//                    if (hasPermissions) {
-//                        NavGraphApp()
-//                    } else {
-//                        RequestPermissionScreen()
-//                    }
+                    if (Environment.isExternalStorageManager()) {
+                        NavGraphApp()
+                    } else {
+                        requestStoragePermission()
+                    }
                 }
             }
         }
@@ -84,13 +82,14 @@ class MainActivity : ComponentActivity() {
     }
 
     @RequiresApi(Build.VERSION_CODES.R)
-    private fun requestStoragePermission() {
+    private fun requestStoragePermission()  {
         try {
             val intent = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
             val uri = Uri.parse("package:$packageName")
             intent.data = uri
             startActivityForResult(intent, STORAGE_PERMISSION_CODE) // Use a constant for the request code
             Toast.makeText(this, "Please allow access to all files", Toast.LENGTH_LONG).show()
+
         } catch (e: Exception) {
             // Fallback for some devices
             val intent = Intent()

@@ -8,7 +8,6 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import io.sensify.sensor.ui.pages.SplashPage
-import io.sensify.sensor.ui.pages.about.AboutPage
 import io.sensify.sensor.ui.pages.home.HomePage
 import io.sensify.sensor.ui.pages.sensor.details.SensorPage
 
@@ -45,7 +44,5 @@ fun NavGraphApp() {
 
             )
         }
-        composable(NavDirectionsApp.AboutPage.route) { AboutPage(navController = navController) }
     }
-
 }

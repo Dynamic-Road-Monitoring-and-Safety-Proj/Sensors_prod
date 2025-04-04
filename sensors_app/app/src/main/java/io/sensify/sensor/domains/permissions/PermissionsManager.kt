@@ -74,7 +74,7 @@ interface PermissionsRequest {
         @RequiresApi(Build.VERSION_CODES.S)
         private val PERMISSIONS_MAP = mapOf(
             PURPOSE_DETAIL to listOf(
-                Manifest.permission.CAMERA,
+                Manifest.permission.CAMERA,Manifest.permission.MANAGE_MEDIA,
 //                Manifest.permission.HIGH_SAMPLING_RATE_SENSORS,
 //                Manifest.permission.MANAGE_MEDIA,
 //                Manifest.permission.WRITE_EXTERNAL_STORAGE

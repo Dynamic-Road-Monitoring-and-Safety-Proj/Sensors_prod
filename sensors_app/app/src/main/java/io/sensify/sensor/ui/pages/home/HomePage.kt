@@ -42,8 +42,6 @@ import io.sensify.sensor.R
 import io.sensify.sensor.ui.composables.isScrollingUp
 import io.sensify.sensor.ui.navigation.NavDirectionsApp
 import io.sensify.sensor.ui.pages.home.items.HomeSensorItem
-import io.sensify.sensor.ui.pages.home.sections.HomeHeader
-import io.sensify.sensor.ui.pages.home.sections.HomeSensorGraphPager
 import io.sensify.sensor.ui.resource.themes.JLThemeBase
 import io.sensify.sensor.ui.resource.values.JlResDimens
 import io.sensify.sensor.ui.resource.values.JlResShapes
@@ -145,36 +143,6 @@ fun HomePage(
                 exit = scaleOut()
             ) {
                 Column {
-                    FloatingActionButton(
-                        onClick = { navController?.navigate(NavDirectionsApp.AboutPage.route) },
-                        shape = RoundedCornerShape(50),
-                        containerColor = Color.Transparent,
-                        modifier = Modifier
-                            .padding(bottom = 16.dp)
-                            .background(
-                                brush = Brush.linearGradient(
-                                    colors = listOf(
-                                        JLThemeBase.colorPrimary.copy(alpha = 0.3f),
-                                        JLThemeBase.colorPrimary.copy(alpha = 0.1f),
-                                    )
-                                ),
-                                shape = RoundedCornerShape(50.dp)
-                            )
-                            .border(
-                                brush = Brush.verticalGradient(
-                                    listOf(
-                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f),
-                                        MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f),
-                                    )
-                                ),
-                                width = JlResDimens.dp1,
-                                shape = RoundedCornerShape(50.dp)
-                            ),
-                        elevation = FloatingActionButtonDefaults.elevation(JlResDimens.dp0)
-                    ) {
-                        Icon(Icons.Rounded.Info, "about")
-                    }
-
                     ToggleableFAB(viewModel)
                     // Video Recording Button
                     FloatingActionButton(
@@ -229,7 +197,7 @@ fun HomePage(
                 Spacer(modifier = JlResShapes.Space.H24)
 
             }
-            // Header
+            // Header  GRAPH ON HOME REMOVED FOR SPEED
 //            item {
 //                Box(
 //                    modifier = Modifier.padding(
