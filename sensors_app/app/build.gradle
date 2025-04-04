@@ -5,12 +5,12 @@ plugins {
 
 }
 android {
-    namespace = "com.example.rstm"
+    namespace = "io.sensify.sensor"
     compileSdk = 34
 
 
     defaultConfig {
-        applicationId = "com.example.rstm"
+        applicationId "io.sensify.sensor"
         minSdk = 24
         targetSdk = 34
         versionCode = 1
