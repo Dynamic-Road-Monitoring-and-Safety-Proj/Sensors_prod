@@ -26,6 +26,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.font.FontWeight
@@ -56,6 +57,7 @@ fun HomePage(
         factory = HomeViewModel.Factory()
     )
 ) {
+    val context = LocalContext.current
     val camVM: CameraViewModel = viewModel(
         factory = CameraViewModel.Factory()
     )
@@ -69,7 +71,7 @@ fun HomePage(
         val videoCapture = VideoCapture.withOutput(recorder)
 
         // Initialize the ViewModel
-//        camVM.initialize(context, videoCapture)
+        camVM.initialize(context, videoCapture)
     }
 
     val coroutineScope = rememberCoroutineScope()
@@ -119,7 +121,6 @@ fun HomePage(
                         contentScale = ContentScale.FillBounds
                     )
                 }
-
             },
             title = {
                 Text(

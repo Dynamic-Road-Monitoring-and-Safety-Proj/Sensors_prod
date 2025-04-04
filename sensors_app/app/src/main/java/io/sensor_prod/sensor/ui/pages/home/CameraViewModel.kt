@@ -33,6 +33,7 @@ class CameraViewModel : ViewModel() {
     @SuppressLint("StaticFieldLeak")
     private lateinit var context: Context
 
+
     fun initialize(context: Context, videoCapture: VideoCapture<Recorder>) {
         this.context = context
         this.videoCapture = videoCapture
