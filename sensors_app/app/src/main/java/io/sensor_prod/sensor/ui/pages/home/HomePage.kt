@@ -69,7 +69,7 @@ fun HomePage(
         val videoCapture = VideoCapture.withOutput(recorder)
 
         // Initialize the ViewModel
-        camVM.initialize(context, videoCapture)
+//        camVM.initialize(context, videoCapture)
     }
 
     val coroutineScope = rememberCoroutineScope()
