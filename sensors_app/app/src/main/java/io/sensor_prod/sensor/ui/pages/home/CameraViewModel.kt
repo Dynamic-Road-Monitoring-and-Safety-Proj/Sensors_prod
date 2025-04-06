@@ -15,12 +15,14 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
+import androidx.compose.runtime.LaunchedEffect
 import androidx.core.util.Consumer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
@@ -32,6 +34,7 @@ class CameraViewModel : ViewModel() {
     private val executor = Executors.newCachedThreadPool()
     @SuppressLint("StaticFieldLeak")
     private lateinit var context: Context
+
 
     fun initialize(context: Context, videoCapture: VideoCapture<Recorder>) {
         this.context = context
@@ -47,6 +50,18 @@ class CameraViewModel : ViewModel() {
             startRecording()
         }
         isRecording = !isRecording
+    }
+
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
+    fun startRecordingClips(){
+        viewModelScope.launch {
+            while (true){
+                startRecording()
+                delay(6000)
+                stopRecording()
+            }
+
+        }
     }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)

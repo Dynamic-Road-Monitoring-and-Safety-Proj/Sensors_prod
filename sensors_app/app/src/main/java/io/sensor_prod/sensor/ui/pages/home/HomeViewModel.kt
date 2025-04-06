@@ -369,24 +369,8 @@ class HomeViewModel : ViewModel() {
     }
 
     private var isRecording = MutableStateFlow(false)
-    fun toggleVideoRecording() {
-        if (isRecording.value) {
-            stopRecording()
-        } else {
-            startRecording()
-        }
-        isRecording.value = !isRecording.value
-    }
 
-    private fun startRecording() {
-        // Implement CameraX or MediaRecorder logic
-        Log.d("Video", "Recording Started")
-    }
 
-    private fun stopRecording() {
-        // Stop MediaRecorder
-        Log.d("Video", "Recording Stopped")
-    }
 
     @Suppress("UNCHECKED_CAST")
     class Factory() : ViewModelProvider.Factory {
