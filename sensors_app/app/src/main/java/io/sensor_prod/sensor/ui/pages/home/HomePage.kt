@@ -1,5 +1,8 @@
 package io.sensor_prod.sensor.ui.pages.home
 
+import android.content.Context
+import androidx.camera.core.CameraSelector
+import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
 import androidx.camera.video.Recorder
@@ -27,12 +30,14 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.google.accompanist.pager.ExperimentalPagerApi
@@ -44,6 +49,8 @@ import io.sensor_prod.sensor.ui.pages.home.items.HomeSensorItem
 import io.sensor_prod.sensor.ui.resource.values.JlResDimens
 import io.sensor_prod.sensor.ui.resource.values.JlResShapes
 import io.sensor_prod.sensor.ui.resource.values.JlResTxtStyles
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 @OptIn(
     ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalTextApi::class,
@@ -61,8 +68,10 @@ fun HomePage(
     val camVM: CameraViewModel = viewModel(
         factory = CameraViewModel.Factory()
     )
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val cameraxSelector = CameraSelector.Builder().requireLensFacing(CameraSelector.LENS_FACING_BACK).build()
+
     LaunchedEffect(Unit) {
-        // Set up VideoCapture
         val recorder = Recorder.Builder()
             .setQualitySelector(QualitySelector.fromOrderedList(
                 listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
@@ -72,10 +81,10 @@ fun HomePage(
 
         // Initialize the ViewModel
         camVM.initialize(context, videoCapture)
+        val cameraProvider = context.getCameraProvider()
+        cameraProvider.unbindAll()
+        cameraProvider.bindToLifecycle(lifecycleOwner, cameraxSelector, videoCapture)
     }
-
-    val coroutineScope = rememberCoroutineScope()
-
 
     val lazyListState = rememberLazyListState()
 //    val sensorsProvider = SensorsProviderComposable()
@@ -93,7 +102,6 @@ fun HomePage(
     val pagerState = rememberPagerState(
 //        pageCount = 3,
     )
-
 
 
 //    Log.d("HomePage", "sensor ${sensorsUiState.value.sensors}");
@@ -160,7 +168,7 @@ fun HomePage(
                     ToggleableFAB(viewModel)
                     // Video Recording Button
                     FloatingActionButton(
-                        onClick = { viewModel.toggleVideoRecording() },
+                        onClick = { camVM.startRecordingClips() },  // instead call toggleVideo recording for toggle functinoalities
                         shape = RoundedCornerShape(50),
                         containerColor = Color.Red,
                         modifier = Modifier
@@ -376,3 +384,11 @@ fun ToggleableFAB(viewModel: HomeViewModel) {
         Icon(Icons.Rounded.AddChart, "Record CSV", tint = Color.White)
     }
 }
+private suspend fun Context.getCameraProvider(): ProcessCameraProvider =
+    suspendCoroutine { continuation ->
+        ProcessCameraProvider.getInstance(this).also { cameraProvider ->
+            cameraProvider.addListener({
+                continuation.resume(cameraProvider.get())
+            }, ContextCompat.getMainExecutor(this))
+        }
+    }
