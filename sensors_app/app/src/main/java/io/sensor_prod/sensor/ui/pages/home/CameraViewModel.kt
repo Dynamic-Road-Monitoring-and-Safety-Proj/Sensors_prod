@@ -22,7 +22,9 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
@@ -52,17 +54,28 @@ class CameraViewModel : ViewModel() {
         isRecording = !isRecording
     }
 
+    private var isClipping = false
+    private var clippingJob: Job? = null
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    fun startRecordingClips(){
-        viewModelScope.launch {
-            while (true){
-                startRecording()
-                delay(6000)
-                stopRecording()
+    fun startRecordingClips() {
+        if (isClipping) {
+            // Stop clipping
+            isClipping = false
+            clippingJob?.cancel()
+            stopRecording()
+        } else {
+            // Start clipping
+            isClipping = true
+            clippingJob = viewModelScope.launch {
+                while (isActive && isClipping) {
+                    startRecording()
+                    delay(6000)
+                    stopRecording()
+                }
             }
-
         }
     }
+
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun startRecording() {
