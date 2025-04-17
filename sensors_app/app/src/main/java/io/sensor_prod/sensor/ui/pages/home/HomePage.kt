@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.rounded.AddChart
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.*
@@ -64,7 +65,10 @@ fun HomePage(
         factory = HomeViewModel.Factory()
     )
 ) {
+
     val context = LocalContext.current
+    viewModel.initModel(context = context)
+
     val camVM: CameraViewModel = viewModel(
         factory = CameraViewModel.Factory()
     )
@@ -91,6 +95,7 @@ fun HomePage(
 //    val sensors = remember { sensorsProvider }
 
     val sensorUiState = viewModel.mUiState.collectAsState()
+    val potholeDetected = viewModel.potholeDetected.collectAsState()
 //    var sensorUiState = viewModel.mUiCurrentSensorState.collectAsState()
 
     val isAtTop = remember {
@@ -196,8 +201,23 @@ fun HomePage(
                     }
                 }
             }
+            AnimatedVisibility(
+                visible = potholeDetected.value,  // Show when pothole is detected
+                enter = scaleIn(),
+                exit = scaleOut()
+            ) {
+                FloatingActionButton(
+                    onClick = { /* Handle pothole detection action */ },
+                    shape = RoundedCornerShape(50),
+                    contentColor = Color.Red,
+                    modifier = Modifier
+                        .padding(bottom = 16.dp)
+                        .background(Color.Red, shape = RoundedCornerShape(50.dp))
+                ) {
+                    Icon(Icons.Default.Warning, contentDescription = "Pothole Detected", tint = Color.White)
+                }
+            }
         }
-
     ) {
 
         LazyColumn(
@@ -355,7 +375,6 @@ fun HomePage(
 fun Factory() {
     TODO("Not yet implemented")
 }
-
 @Composable
 fun ToggleableFAB(viewModel: HomeViewModel) {
     var isLogging by remember { mutableStateOf(false) }

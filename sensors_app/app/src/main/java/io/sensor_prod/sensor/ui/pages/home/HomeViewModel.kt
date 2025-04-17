@@ -50,7 +50,7 @@ class HomeViewModel : ViewModel() {
     private val errorBuffer = mutableListOf<Float>()
 
     fun initModel(context: Context) {
-        val model = loadModelFile(context, "model_rms_xyz.tflite")
+        val model = loadModelFile(context, "model_rms.tflite")
         interpreter = Interpreter(model)
     }
 
@@ -73,6 +73,9 @@ class HomeViewModel : ViewModel() {
         }
     }
 
+
+    private val _potholeDetected = MutableStateFlow(false)  // By default, no pothole
+    val potholeDetected: StateFlow<Boolean> = _potholeDetected.asStateFlow()
 
     fun checkPotholeFromSensors() {
         viewModelScope.launch {
@@ -97,13 +100,17 @@ class HomeViewModel : ViewModel() {
                     updateThreshold(error)
 
                     if (error > threshold) {
+                        // Update the state to trigger UI changes
+                        _potholeDetected.value = true
                         Log.d("POTHOLE", "Anomaly Detected! Predicted=$predicted, RMS=$rms")
-                        // Optionally: trigger LiveData event / notify UI
+                    } else {
+                        _potholeDetected.value = false
                     }
                 }
             }
         }
     }
+
 
     private fun updateThreshold(latestError: Float) {
         errorBuffer.add(latestError)
