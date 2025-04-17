@@ -1,6 +1,7 @@
 package io.sensor_prod.sensor.ui.pages.home
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorManager
 import android.os.Environment
@@ -23,6 +24,15 @@ import java.io.BufferedWriter
 import java.io.File
 import java.io.FileWriter
 import androidx.core.util.size
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import org.tensorflow.lite.Interpreter
+import java.io.FileInputStream
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
+import kotlin.math.abs
+import kotlin.math.pow
+import kotlin.math.sqrt
 
 
 class HomeViewModel : ViewModel() {
@@ -31,12 +41,84 @@ class HomeViewModel : ViewModel() {
 
     private var mSensors: MutableList<ModelHomeSensor> = mutableListOf()
 
+    // Prophet vars
+    private lateinit var interpreter: Interpreter
+    private val buffer = ArrayDeque<Float>()
+    private val WINDOW_SIZE = 10
+    private val THRESH_MULTIPLIER = 2f
+    private var threshold = 0f
+    private val errorBuffer = mutableListOf<Float>()
+
+    fun initModel(context: Context) {
+        val model = loadModelFile(context, "model_rms_xyz.tflite")
+        interpreter = Interpreter(model)
+    }
+
+    private fun loadModelFile(context: Context, modelName: String): MappedByteBuffer {
+        val assetFileDescriptor = context.assets.openFd(modelName)
+        val inputStream = FileInputStream(assetFileDescriptor.fileDescriptor)
+        val fileChannel = inputStream.channel
+        return fileChannel.map(
+            FileChannel.MapMode.READ_ONLY,
+            assetFileDescriptor.startOffset,
+            assetFileDescriptor.declaredLength
+        )
+    }
+    fun startMonitoringSensors() {
+        viewModelScope.launch {
+            while (isActive) {
+                checkPotholeFromSensors()
+                delay(500L)
+            }
+        }
+    }
+
+
+    fun checkPotholeFromSensors() {
+        viewModelScope.launch {
+            val activeSensor = mSensors.find { it.isActive && it.valueRms != null }
+
+            activeSensor?.valueRms?.let { rms ->
+                if (buffer.size >= WINDOW_SIZE) buffer.removeFirst()
+                buffer.addLast(rms)
+
+                if (buffer.size == WINDOW_SIZE) {
+                    val input = Array(1) { Array(WINDOW_SIZE) { FloatArray(1) } }
+                    buffer.forEachIndexed { i, value ->
+                        input[0][i][0] = value
+                    }
+
+                    val output = Array(1) { FloatArray(1) }
+                    interpreter.run(input, output)
+
+                    val predicted = output[0][0]
+                    val error = abs(predicted - rms)
+
+                    updateThreshold(error)
+
+                    if (error > threshold) {
+                        Log.d("POTHOLE", "Anomaly Detected! Predicted=$predicted, RMS=$rms")
+                        // Optionally: trigger LiveData event / notify UI
+                    }
+                }
+            }
+        }
+    }
+
+    private fun updateThreshold(latestError: Float) {
+        errorBuffer.add(latestError)
+        if (errorBuffer.size > 100) errorBuffer.removeAt(0)
+
+        val mean = errorBuffer.average().toFloat()
+        val std = sqrt(errorBuffer.map { (it - mean).pow(2) }.average().toFloat())
+        threshold = mean + THRESH_MULTIPLIER * std
+    }
+
     // Game UI state
     private val _uiState = MutableStateFlow(HomeUiState())
 
     // Backing property to avoid state updates from other classes
     val mUiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
-
 
     /* private val _uiPagerState = MutableStateFlow(HomeUiState())
      // Backing property to avoid state updates from other classes
@@ -75,6 +157,7 @@ class HomeViewModel : ViewModel() {
 //        Log.d("HomeViewModel", "viewmodel init")
 
         viewModelScope.launch {
+            startMonitoringSensors()
             SensorsProvider.getInstance().mSensorsFlow.map { value ->
                 value.map {
                     ModelHomeSensor(
@@ -99,9 +182,6 @@ class HomeViewModel : ViewModel() {
                     getInitialChartData()
                     initializeFlow()
                 }
-//                mSensorsList.emit(_mSensorsList)
-
-                /* emitUiState()*/
 
             }
 
@@ -266,7 +346,6 @@ class HomeViewModel : ViewModel() {
 
         var index = mSensors.indexOfFirst { it.type == type }
         if (index >= 0) {
-//            Log.d("HomeViewModel", "onSensorChecked: Index: $index $isChecked")
             var sensor = mSensors[index]
             var updatedSensor =
                 ModelHomeSensor(sensor.type, sensor.sensor, sensor.info, sensor.valueRms, isChecked)
@@ -276,11 +355,6 @@ class HomeViewModel : ViewModel() {
             updateActiveSensor(updatedSensor, isChecked)
 
         }
-        /*viewModelScope.launch {
-            emitUiState()
-
-        }*/
-
     }
 
     private fun updateActiveSensor(sensor: ModelHomeSensor, isChecked: Boolean = false) {

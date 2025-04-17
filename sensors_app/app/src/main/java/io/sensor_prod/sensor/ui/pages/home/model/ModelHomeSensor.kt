@@ -11,9 +11,7 @@ data class ModelHomeSensor(
     var isActive:  Boolean =  false,
 var name: String = ""
 ) {
-
     init {
-
         name = SensorsConstants.MAP_TYPE_TO_NAME.get( type,sensor?.name?:"")
     }
 }

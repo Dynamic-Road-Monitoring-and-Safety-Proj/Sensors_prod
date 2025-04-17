@@ -29,7 +29,7 @@ import kotlinx.coroutines.launch
 import java.util.concurrent.Executors
 
 class CameraViewModel : ViewModel() {
-    private var isRecording = false
+    var isRecording = false
     private lateinit var videoCapture: VideoCapture<Recorder>
     private val uriList: MutableList<Uri> = mutableListOf()
     private var recording: Recording? = null

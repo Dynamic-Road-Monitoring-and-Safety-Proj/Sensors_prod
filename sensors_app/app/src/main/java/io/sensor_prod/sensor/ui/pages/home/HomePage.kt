@@ -166,28 +166,33 @@ fun HomePage(
             ) {
                 Column {
                     ToggleableFAB(viewModel)
-                    // Video Recording Button
                     FloatingActionButton(
-                        onClick = { camVM.startRecordingClips() },  // instead call toggleVideo recording for toggle functinoalities
+                        onClick = { camVM.toggleVideoRecording() },
                         shape = RoundedCornerShape(50),
-                        containerColor = Color.Red,
+                        containerColor = if (camVM.isRecording) Color.Red else Color.Blue,
                         modifier = Modifier
                             .padding(bottom = 16.dp)
                             .background(
                                 brush = Brush.linearGradient(
-                                    colors = listOf(Color.Red.copy(alpha = 0.8f), Color.Red.copy(alpha = 0.5f))
+                                    colors = if (camVM.isRecording)
+                                        listOf(Color.Red.copy(alpha = 0.8f), Color.Red.copy(alpha = 0.5f))
+                                    else
+                                        listOf(Color.Blue.copy(alpha = 0.8f), Color.Blue.copy(alpha = 0.5f))
                                 ),
                                 shape = RoundedCornerShape(50.dp)
                             )
                             .border(
                                 brush = Brush.verticalGradient(
-                                    listOf(Color.Black.copy(alpha = 0.1f), Color.Black.copy(alpha = 0.3f))
+                                    colors = if (camVM.isRecording)
+                                        listOf(Color.Black.copy(alpha = 0.1f), Color.Black.copy(alpha = 0.3f))
+                                    else
+                                        listOf(Color.White.copy(alpha = 0.1f), Color.White.copy(alpha = 0.3f))
                                 ),
                                 width = JlResDimens.dp1,
                                 shape = RoundedCornerShape(50.dp)
                             )
                     ) {
-                        Icon(Icons.Rounded.Videocam,"Record Video", tint = Color.White)
+                        Icon(Icons.Rounded.Videocam, "Record Video", tint = Color.White)
                     }
                 }
             }
