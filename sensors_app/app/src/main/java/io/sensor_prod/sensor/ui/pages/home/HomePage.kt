@@ -385,16 +385,7 @@ fun HomePage(
             }
 
             item { Spacer(modifier = Modifier.height(JlResDimens.dp16)) }
-//            }
         }
-    }
-    if (potholeDetected.value) {
-        Icon(
-            painter = painterResource(id = R.drawable.ic_sensify_logo), // Use any drawable warning icon
-            contentDescription = "Pothole Detected",
-            tint = Color.Red,
-            modifier = Modifier.padding(start = 24.dp, top= 13.dp)
-        )
     }
 }
 

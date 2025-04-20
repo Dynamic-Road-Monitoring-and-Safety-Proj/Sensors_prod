@@ -88,16 +88,20 @@ class CameraViewModel : ViewModel() {
         }
         isTriggerRecordingInProgress = true
         viewModelScope.launch(Dispatchers.IO) {
-            // Stop current recording safely
-            try{
-                recording?.stop()
+            try {
+                // Stop current recording safely
+                if (isRecording) {
+                    recording?.stop()
+                }
+
                 delay(500) // Small buffer to ensure video is finalized
 
                 val copiedUris = uriList.takeLast(2)
                 copiedUris.forEachIndexed { index, uri ->
                     val inputStream = context.contentResolver.openInputStream(uri)
                     if (inputStream != null) {
-                        val fileName = "trigger_clip_$index.mp4"
+                        val timestamp = System.currentTimeMillis()
+                        val fileName = "trigger_clip_${index}_$timestamp.mp4"
 
                         val contentValues = ContentValues().apply {
                             put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
@@ -126,15 +130,16 @@ class CameraViewModel : ViewModel() {
                 if (!isRecording && !isClipping) {
                     startRecording()
                 }
-            }
-            finally {
+            } catch (e: Exception) {
+                Log.e("TriggerSave", "Exception during trigger clip save: ${e.message}", e)
+            } finally {
                 delay(2000)
                 isTriggerRecordingInProgress = false
             }
         }
     }
 
-    // Helper Functions
+        // Helper Functions
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun startRecording() {
