@@ -39,6 +39,7 @@ class CameraViewModel : ViewModel() {
     private val executor = Executors.newCachedThreadPool()
     @SuppressLint("StaticFieldLeak")
     private lateinit var context: Context
+    private var isTriggerRecordingInProgress = false
 
     // Utility functions
     fun initialize(context: Context, videoCapture: VideoCapture<Recorder>) {
@@ -81,71 +82,58 @@ class CameraViewModel : ViewModel() {
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun triggerEventRecording() {
-
+        if (isTriggerRecordingInProgress) {
+            // Optionally log or notify that a trigger is already in progress
+            return
+        }
+        isTriggerRecordingInProgress = true
         viewModelScope.launch(Dispatchers.IO) {
             // Stop current recording safely
-            recording?.stop()
-            delay(500) // Small buffer to ensure video is finalized
+            try{
+                recording?.stop()
+                delay(500) // Small buffer to ensure video is finalized
 
-            val copiedUris = uriList.takeLast(2)
-            copiedUris.forEachIndexed { index, uri ->
-                val inputStream = context.contentResolver.openInputStream(uri)
-                if (inputStream != null) {
-                    val fileName = "trigger_clip_$index.mp4"
+                val copiedUris = uriList.takeLast(2)
+                copiedUris.forEachIndexed { index, uri ->
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    if (inputStream != null) {
+                        val fileName = "trigger_clip_$index.mp4"
 
-                    val contentValues = ContentValues().apply {
-                        put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
-                        put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/trigger_recordings")
-                        put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                    }
-
-                    val triggerUri = context.contentResolver.insert(
-                        MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                        contentValues
-                    )
-
-                    triggerUri?.let { destUri ->
-                        context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
-                            inputStream.copyTo(outputStream)
-                            Log.d("TriggerSave", "Saved trigger clip as: $fileName")
+                        val contentValues = ContentValues().apply {
+                            put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+                            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/trigger_recordings")
+                            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                         }
-                        inputStream.close()
+
+                        val triggerUri = context.contentResolver.insert(
+                            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                            contentValues
+                        )
+
+                        triggerUri?.let { destUri ->
+                            context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
+                                inputStream.copyTo(outputStream)
+                                Log.d("TriggerSave", "Saved trigger clip as: $fileName")
+                            }
+                            inputStream.close()
+                        }
+                    } else {
+                        Log.e("TriggerSave", "Failed to open input stream for URI: $uri")
                     }
-                } else {
-                    Log.e("TriggerSave", "Failed to open input stream for URI: $uri")
+                }
+
+                // Resume normal recording
+                if (!isRecording && !isClipping) {
+                    startRecording()
                 }
             }
-
-            // Resume normal recording
-            if (!isRecording && !isClipping) {
-                startRecording()
+            finally {
+                isTriggerRecordingInProgress = false
             }
         }
     }
 
     // Helper Functions
-    private fun moveVideoToFolder(context: Context, sourceUri: Uri, destFolder: File, fileName: String) {
-        try {
-            val inputStream = context.contentResolver.openInputStream(sourceUri)
-            val destFile = File(destFolder, fileName)
-            val outputStream = FileOutputStream(destFile)
-
-            inputStream?.copyTo(outputStream)
-
-            inputStream?.close()
-            outputStream.close()
-
-            // Optionally delete original
-            context.contentResolver.delete(sourceUri, null, null)
-
-            // Remove from uriList to prevent confusion
-            uriList.remove(sourceUri)
-
-        } catch (e: Exception) {
-            Log.e("MoveVideo", "Failed to move $fileName", e)
-        }
-    }
-
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun startRecording() {

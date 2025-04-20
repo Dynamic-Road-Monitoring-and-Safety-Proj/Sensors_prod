@@ -31,6 +31,7 @@ import androidx.compose.material.icons.rounded.AddChart
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -115,18 +116,10 @@ fun HomePage(
         }
     }
 
-    var isSetupComplete by remember { mutableStateOf(false) }
-
-// Trigger the setup delay only once
-    LaunchedEffect(Unit) {
-        delay(10_000) // 10 seconds
-        isSetupComplete = true
-    }
-
-    LaunchedEffect(potholeDetected.value, isSetupComplete) {
-        if (isSetupComplete && potholeDetected.value) {
+    LaunchedEffect(potholeDetected.value) {
+        if (potholeDetected.value) {
             withContext(Dispatchers.Main) {
-                try {//TODO
+                try {
                     camVM.triggerEventRecording()
                 } catch (e: Exception) {
                     Log.e("Recording", "Error: ${e.message}", e)
@@ -393,6 +386,16 @@ fun HomePage(
 
             item { Spacer(modifier = Modifier.height(JlResDimens.dp16)) }
 //            }
+        }
+        if (potholeDetected.value) {
+            Icon(
+                painter = painterResource(id = R.drawable.ic_sensify_logo), // Use any drawable warning icon
+                contentDescription = "Pothole Detected",
+                tint = Color.Red,
+                modifier = Modifier
+                    .padding(top = 16.dp, end = 16.dp, left = 16.dp)
+                    .size(48.dp)
+            )
         }
 
     }
