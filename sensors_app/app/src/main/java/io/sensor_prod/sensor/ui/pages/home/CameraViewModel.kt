@@ -128,6 +128,7 @@ class CameraViewModel : ViewModel() {
                 }
             }
             finally {
+                delay(2000)
                 isTriggerRecordingInProgress = false
             }
         }
