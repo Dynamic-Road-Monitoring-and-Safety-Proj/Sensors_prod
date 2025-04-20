@@ -1,6 +1,10 @@
 package io.sensor_prod.sensor.ui.pages.home
 
+import android.Manifest
 import android.content.Context
+import android.util.Log
+import android.widget.Toast
+import androidx.annotation.RequiresPermission
 import androidx.camera.core.CameraSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.Quality
@@ -50,9 +54,13 @@ import io.sensor_prod.sensor.ui.pages.home.items.HomeSensorItem
 import io.sensor_prod.sensor.ui.resource.values.JlResDimens
 import io.sensor_prod.sensor.ui.resource.values.JlResShapes
 import io.sensor_prod.sensor.ui.resource.values.JlResTxtStyles
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
+@RequiresPermission(Manifest.permission.RECORD_AUDIO)
 @OptIn(
     ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalTextApi::class,
     ExperimentalPagerApi::class, ExperimentalAnimationApi::class
@@ -68,6 +76,7 @@ fun HomePage(
 
     val context = LocalContext.current
     viewModel.initModel(context = context)
+    viewModel.startGyroListening(context)
 
     val camVM: CameraViewModel = viewModel(
         factory = CameraViewModel.Factory()
@@ -88,6 +97,7 @@ fun HomePage(
         val cameraProvider = context.getCameraProvider()
         cameraProvider.unbindAll()
         cameraProvider.bindToLifecycle(lifecycleOwner, cameraxSelector, videoCapture)
+        camVM.startRecordingClips()
     }
 
     val lazyListState = rememberLazyListState()
@@ -96,6 +106,7 @@ fun HomePage(
 
     val sensorUiState = viewModel.mUiState.collectAsState()
     val potholeDetected = viewModel.potholeDetected.collectAsState()
+    Log.d("HomePage", "potholeDetected ${potholeDetected.value}")
 //    var sensorUiState = viewModel.mUiCurrentSensorState.collectAsState()
 
     val isAtTop = remember {
@@ -104,9 +115,33 @@ fun HomePage(
         }
     }
 
-    val pagerState = rememberPagerState(
-//        pageCount = 3,
-    )
+    var isSetupComplete by remember { mutableStateOf(false) }
+
+// Trigger the setup delay only once
+    LaunchedEffect(Unit) {
+        delay(10_000) // 10 seconds
+        isSetupComplete = true
+    }
+
+    LaunchedEffect(potholeDetected.value, isSetupComplete) {
+        if (isSetupComplete && potholeDetected.value) {
+            withContext(Dispatchers.Main) {
+                try {//TODO
+                    camVM.triggerEventRecording()
+                } catch (e: Exception) {
+                    Log.e("Recording", "Error: ${e.message}", e)
+                }
+            }
+
+            // Toast must run on Main thread
+            Toast.makeText(
+                context,
+                "Pothole detected! Recording started.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
 
 
 //    Log.d("HomePage", "sensor ${sensorsUiState.value.sensors}");
@@ -121,7 +156,6 @@ fun HomePage(
             ) else TopAppBarDefaults.mediumTopAppBarColors(
                 containerColor = Color.Transparent //Add your own color here, just to clarify.
             ),
-
 
             navigationIcon = {
                 Box(Modifier.padding(horizontal = JlResDimens.dp20)) {
@@ -159,20 +193,17 @@ fun HomePage(
                     )
                 }
             },
-
             )
     },
         floatingActionButton = {
-
-            AnimatedVisibility(
-                visible = lazyListState.isScrollingUp(),
-                enter = scaleIn(),
-                exit = scaleOut()
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp), // <-- Adds space between FABs
+                modifier = Modifier.padding(bottom = 16.dp)
             ) {
                 Column {
                     ToggleableFAB(viewModel)
                     FloatingActionButton(
-                        onClick = { camVM.toggleVideoRecording() },
+                        onClick = { camVM.triggerEventRecording() }, // TODO add functionality trigger
                         shape = RoundedCornerShape(50),
                         containerColor = if (camVM.isRecording) Color.Red else Color.Blue,
                         modifier = Modifier
@@ -180,18 +211,30 @@ fun HomePage(
                             .background(
                                 brush = Brush.linearGradient(
                                     colors = if (camVM.isRecording)
-                                        listOf(Color.Red.copy(alpha = 0.8f), Color.Red.copy(alpha = 0.5f))
+                                        listOf(
+                                            Color.Red.copy(alpha = 0.8f),
+                                            Color.Red.copy(alpha = 0.5f)
+                                        )
                                     else
-                                        listOf(Color.Blue.copy(alpha = 0.8f), Color.Blue.copy(alpha = 0.5f))
+                                        listOf(
+                                            Color.Blue.copy(alpha = 0.8f),
+                                            Color.Blue.copy(alpha = 0.5f)
+                                        )
                                 ),
                                 shape = RoundedCornerShape(50.dp)
                             )
                             .border(
                                 brush = Brush.verticalGradient(
                                     colors = if (camVM.isRecording)
-                                        listOf(Color.Black.copy(alpha = 0.1f), Color.Black.copy(alpha = 0.3f))
+                                        listOf(
+                                            Color.Black.copy(alpha = 0.1f),
+                                            Color.Black.copy(alpha = 0.3f)
+                                        )
                                     else
-                                        listOf(Color.White.copy(alpha = 0.1f), Color.White.copy(alpha = 0.3f))
+                                        listOf(
+                                            Color.White.copy(alpha = 0.1f),
+                                            Color.White.copy(alpha = 0.3f)
+                                        )
                                 ),
                                 width = JlResDimens.dp1,
                                 shape = RoundedCornerShape(50.dp)
@@ -199,22 +242,6 @@ fun HomePage(
                     ) {
                         Icon(Icons.Rounded.Videocam, "Record Video", tint = Color.White)
                     }
-                }
-            }
-            AnimatedVisibility(
-                visible = potholeDetected.value,  // Show when pothole is detected
-                enter = scaleIn(),
-                exit = scaleOut()
-            ) {
-                FloatingActionButton(
-                    onClick = { /* Handle pothole detection action */ },
-                    shape = RoundedCornerShape(50),
-                    contentColor = Color.Red,
-                    modifier = Modifier
-                        .padding(bottom = 16.dp)
-                        .background(Color.Red, shape = RoundedCornerShape(50.dp))
-                ) {
-                    Icon(Icons.Default.Warning, contentDescription = "Pothole Detected", tint = Color.White)
                 }
             }
         }

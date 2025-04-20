@@ -3,9 +3,13 @@ package io.sensor_prod.sensor.ui.pages.home
 import android.annotation.SuppressLint
 import android.content.Context
 import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
 import android.os.Environment
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
@@ -40,6 +44,9 @@ class HomeViewModel : ViewModel() {
 //    private var mLogTimestamp: Long = 0
 
     private var mSensors: MutableList<ModelHomeSensor> = mutableListOf()
+    private var lastDetectionTime = 0L
+    private val cooldownMillis = 5000L // 5 seconds
+
 
     // Prophet vars
     private lateinit var interpreter: Interpreter
@@ -74,43 +81,82 @@ class HomeViewModel : ViewModel() {
     }
 
 
-    private val _potholeDetected = MutableStateFlow(false)  // By default, no pothole
-    val potholeDetected: StateFlow<Boolean> = _potholeDetected.asStateFlow()
+    private val gyroscopeValues = mutableListOf<Float>()
 
-    fun checkPotholeFromSensors() {
-        viewModelScope.launch {
-            val activeSensor = mSensors.find { it.isActive && it.valueRms != null }
+    private val sensorEventListener = object : SensorEventListener {
+        @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+        override fun onSensorChanged(event: SensorEvent?) {
+            event?.let {
+                if (event.sensor.type == Sensor.TYPE_GYROSCOPE) {
+                    val x = event.values[0]
+                    val y = event.values[1]
+                    val z = event.values[2]
 
-            activeSensor?.valueRms?.let { rms ->
-                if (buffer.size >= WINDOW_SIZE) buffer.removeFirst()
-                buffer.addLast(rms)
+                    // Calculate the magnitude of angular velocity
+                    val magnitude = sqrt(x * x + y * y + z * z)
 
-                if (buffer.size == WINDOW_SIZE) {
-                    val input = Array(1) { Array(WINDOW_SIZE) { FloatArray(1) } }
-                    buffer.forEachIndexed { i, value ->
-                        input[0][i][0] = value
+                    // Maintain a window of values
+                    if (gyroscopeValues.size >= WINDOW_SIZE) {
+                        gyroscopeValues.removeFirst()
                     }
+                    gyroscopeValues.add(magnitude)
 
-                    val output = Array(1) { FloatArray(1) }
-                    interpreter.run(input, output)
-
-                    val predicted = output[0][0]
-                    val error = abs(predicted - rms)
-
-                    updateThreshold(error)
-
-                    if (error > threshold) {
-                        // Update the state to trigger UI changes
-                        _potholeDetected.value = true
-                        Log.d("POTHOLE", "Anomaly Detected! Predicted=$predicted, RMS=$rms")
-                    } else {
-                        _potholeDetected.value = false
-                    }
+                    checkPotholeFromSensors()
                 }
             }
         }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
+    private val _potholeDetected = MutableStateFlow(false)
+    val potholeDetected: StateFlow<Boolean> = _potholeDetected.asStateFlow()
+
+    fun startGyroListening(context: Context) {
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+        sensorManager.registerListener(sensorEventListener, gyroscope, SensorManager.SENSOR_DELAY_GAME)
+    }
+
+    private fun checkPotholeFromSensors() {
+        val now = System.currentTimeMillis()
+        if (now - lastDetectionTime < cooldownMillis) return  // 🚫 Early return if in cooldown
+
+        if (gyroscopeValues.size < WINDOW_SIZE) return
+
+        // Step 1: Calculate RMS
+        val rms = sqrt(gyroscopeValues.map { it * it }.average().toFloat())
+
+        // Step 2: Update buffer
+        if (buffer.size >= WINDOW_SIZE) buffer.removeFirst()
+        buffer.addLast(rms)
+
+        if (buffer.size == WINDOW_SIZE) {
+            // Step 3: Prepare input
+            val input = Array(1) { Array(WINDOW_SIZE) { FloatArray(1) } }
+            buffer.forEachIndexed { i, value -> input[0][i][0] = value }
+
+            // Step 4: Run model
+            val output = Array(1) { FloatArray(1) }
+            interpreter.run(input, output)
+
+            val predicted = output[0][0]
+            val error = abs(predicted - rms)
+
+            // Step 5: Threshold logic
+            updateThreshold(error)
+            val potholeDetected = error > threshold
+
+            if (potholeDetected) {
+                lastDetectionTime = now  // ✅ Cooldown begins now
+                _potholeDetected.value = true
+
+                Log.d("POTHOLE", "Anomaly Detected! Predicted=$predicted, RMS=$rms, Error=$error, Threshold=$threshold")
+            } else {
+                _potholeDetected.value = false
+            }
+        }
+    }
 
     private fun updateThreshold(latestError: Float) {
         errorBuffer.add(latestError)
@@ -149,8 +195,6 @@ class HomeViewModel : ViewModel() {
 
     private val mIsActiveMap = mutableMapOf<Int, Boolean>(
         Pair(Sensor.TYPE_GYROSCOPE, true),
-//        Pair(Sensor.TYPE_ACCELEROMETER, true)
-        Pair(Sensor.TYPE_MAGNETIC_FIELD, true)
     )
 
     //    TODO use this in future private val mSensorPacketsMap = mutableMapOf<Int, ModelSensorPacket>()
