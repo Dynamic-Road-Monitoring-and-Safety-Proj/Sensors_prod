@@ -112,7 +112,7 @@ class CameraViewModel : ViewModel() {
                     val inputStream = context.contentResolver.openInputStream(uri)
                     if (inputStream != null) {
                         val timestamp = SimpleDateFormat("yyyyMMdd_HH:mm:ss", Locale.US).format(Date())
-                        val triggerFileName = "trigger_clip_${index}_$timestamp.mp4"
+                        val triggerFileName = "trigger_${index}_$timestamp.mp4"
 
                         val contentValues = ContentValues().apply {
                             put(MediaStore.Video.Media.DISPLAY_NAME, triggerFileName)
@@ -223,7 +223,7 @@ class CameraViewModel : ViewModel() {
 
         val timestamp = SimpleDateFormat("yyyyMMdd_HH:mm:ss", Locale.US).format(Date())
         val fileName = "clip_$timestamp.mp4"
-        val targetFolder = "Movies/dashcam_clips"
+        val targetFolder = "Movies/dashcam_"
 
         deleteOldestVideosIfNeeded(context, targetFolder, maxFiles = 15)
 
