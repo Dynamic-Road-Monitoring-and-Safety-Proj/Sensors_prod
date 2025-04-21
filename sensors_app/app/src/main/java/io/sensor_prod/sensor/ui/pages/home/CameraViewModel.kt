@@ -34,7 +34,6 @@ import java.util.concurrent.Executors
 class CameraViewModel : ViewModel() {
     var isRecording = false
     private lateinit var videoCapture: VideoCapture<Recorder>
-    private val uriList: MutableList<Uri> = mutableListOf()
     private var recording: Recording? = null
     private val executor = Executors.newCachedThreadPool()
     @SuppressLint("StaticFieldLeak")
@@ -45,7 +44,6 @@ class CameraViewModel : ViewModel() {
     fun initialize(context: Context, videoCapture: VideoCapture<Recorder>) {
         this.context = context
         this.videoCapture = videoCapture
-        initializeUriList(context, uriList)
     }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
@@ -82,56 +80,67 @@ class CameraViewModel : ViewModel() {
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun triggerEventRecording() {
-        if (isTriggerRecordingInProgress) {
-            // Optionally log or notify that a trigger is already in progress
-            return
-        }
+        if (isTriggerRecordingInProgress) return
+
         isTriggerRecordingInProgress = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Stop current recording safely
                 if (isRecording) {
                     recording?.stop()
                 }
 
-                delay(500) // Small buffer to ensure video is finalized
+                delay(500)
 
-                val copiedUris = uriList.takeLast(2)
-                copiedUris.forEachIndexed { index, uri ->
-                    val inputStream = context.contentResolver.openInputStream(uri)
-                    if (inputStream != null) {
-                        val timestamp = System.currentTimeMillis()
-                        val fileName = "trigger_clip_${index}_$timestamp.mp4"
+                val targetFolder = "Movies/trigger_recordings"
 
-                        val contentValues = ContentValues().apply {
-                            put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
-                            put(MediaStore.Video.Media.RELATIVE_PATH, "Movies/trigger_recordings")
-                            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                        }
+                // (Optional) Pre-trigger a query to help ensure the folder exists/mounts correctly
+                context.contentResolver.query(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(MediaStore.Video.Media._ID),
+                    "${MediaStore.Video.Media.RELATIVE_PATH} = ?",
+                    arrayOf(targetFolder),
+                    null
+                )?.close()
 
-                        val triggerUri = context.contentResolver.insert(
-                            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                            contentValues
-                        )
+                listOf("4.mp4", "5.mp4").forEachIndexed { index, fileName ->
+                    val uri = findVideoUriByName(context, fileName)
+                    if (uri != null) {
+                        val inputStream = context.contentResolver.openInputStream(uri)
+                        if (inputStream != null) {
+                            val timestamp = System.currentTimeMillis()
+                            val triggerFileName = "trigger_clip_${index}_$timestamp.mp4"
 
-                        triggerUri?.let { destUri ->
-                            context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
-                                inputStream.copyTo(outputStream)
-                                Log.d("TriggerSave", "Saved trigger clip as: $fileName")
+                            val contentValues = ContentValues().apply {
+                                put(MediaStore.Video.Media.DISPLAY_NAME, triggerFileName)
+                                put(MediaStore.Video.Media.RELATIVE_PATH, targetFolder)
+                                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                             }
-                            inputStream.close()
+
+                            val triggerUri = context.contentResolver.insert(
+                                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                                contentValues
+                            )
+
+                            triggerUri?.let { destUri ->
+                                context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
+                                    inputStream.copyTo(outputStream)
+                                    Log.d("TriggerSave", "Saved trigger clip as: $triggerFileName")
+                                }
+                                inputStream.close()
+                            }
+                        } else {
+                            Log.e("TriggerSave", "Failed to open input stream for $fileName")
                         }
                     } else {
-                        Log.e("TriggerSave", "Failed to open input stream for URI: $uri")
+                        Log.e("TriggerSave", "URI not found for $fileName")
                     }
                 }
 
-                // Resume normal recording
                 if (!isRecording && !isClipping) {
                     startRecording()
                 }
             } catch (e: Exception) {
-                Log.e("TriggerSave", "Exception during trigger clip save: ${e.message}", e)
+                Log.e("TriggerSave", "Exception during trigger save: ${e.message}", e)
             } finally {
                 delay(2000)
                 isTriggerRecordingInProgress = false
@@ -139,7 +148,8 @@ class CameraViewModel : ViewModel() {
         }
     }
 
-        // Helper Functions
+
+    // Helper Functions
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun startRecording() {
@@ -148,7 +158,7 @@ class CameraViewModel : ViewModel() {
                 if(isRecording == true) {
                     recording?.stop()
                 }
-                val result = captureVideo(videoCapture, context, uriList)
+                val result = captureVideo(videoCapture, context)
 
                 CoroutineScope(Dispatchers.Main).launch {
 //                    Toast.makeText(context, "Recording started", Toast.LENGTH_SHORT).show()
@@ -177,21 +187,19 @@ class CameraViewModel : ViewModel() {
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun captureVideo(
         videoCapture: VideoCapture<Recorder>,
-        context: Context,
-        uriList: MutableList<Uri>
+        context: Context
     ): Pair<PendingRecording, Consumer<VideoRecordEvent>> {
 
-        val name = if (uriList.size >= 6) {
-            deleteOldestVideo(context, uriList)
-            renameVideos(context, uriList)
+        val name = if (getUsedFileNames(context).size >= 6) {
+            deleteOldestVideo(context)
+            renameVideos(context)
             getNextAvailableFileName(context)
         } else {
             getNextAvailableFileName(context)
         }
 
-        val existingUri = findVideoUriByName(context, name)
-        if (existingUri != null) {
-            context.contentResolver.delete(existingUri, null, null)  // Delete existing file
+        findVideoUriByName(context, name)?.let {
+            context.contentResolver.delete(it, null, null)
             Log.d("CameraViewModel", "Deleted existing video: $name")
         }
 
@@ -202,101 +210,72 @@ class CameraViewModel : ViewModel() {
         val mediaStoreOutput = MediaStoreOutputOptions.Builder(
             context.contentResolver,
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        )
-            .setContentValues(contentValues)
-            .build()
+        ).setContentValues(contentValues).build()
 
         val captureListener = Consumer<VideoRecordEvent> { event ->
             when (event) {
-                is VideoRecordEvent.Start -> {
-//                    Log.d("CameraViewModel", "Recording started")
-                }
                 is VideoRecordEvent.Finalize -> {
-                    if (event.error == VideoRecordEvent.Finalize.ERROR_NONE) {
-                        uriList.add(event.outputResults.outputUri)
-                    } else {
+                    if (event.error != VideoRecordEvent.Finalize.ERROR_NONE) {
                         Log.e("CameraViewModel", "Recording failed: ${event.cause}")
-                        refreshUriList(context, uriList)
                     }
                 }
-                else -> {
-                    // Handle other events if needed
-                }
+                else -> { /* Handle if needed */ }
             }
         }
 
         val recording = videoCapture.output
             .prepareRecording(context, mediaStoreOutput)
             .withAudioEnabled()
+
         return Pair(recording, captureListener)
     }
-    private fun refreshUriList(context: Context, uriList: MutableList<Uri>) {
-        uriList.clear()
-        for (i in 0..5) {
-            findVideoUriByName(context, "$i.mp4")?.let { uriList.add(it) }
-        }
-    }
-    private fun getNextAvailableFileName(context: Context): String {
-        val usedNames = mutableSetOf<String>()
-        for (i in 0..5) {
-            if (findVideoUriByName(context, "$i.mp4") != null) {
-                usedNames.add("$i.mp4")
-            }
-        }
-        for (i in 0..5) {
-            val name = "$i.mp4"
-            if (!usedNames.contains(name)) return name
-        }
-        return "0.mp4" // fallback
-    }
 
-
-    private fun deleteOldestVideo(context: Context, uriList: MutableList<Uri>) {
-        if (uriList.isNotEmpty()) {
-            val oldestUri = uriList.first()
+    private fun deleteOldestVideo(context: Context) {
+        val oldestUri = (0..5).firstNotNullOfOrNull { findVideoUriByName(context, "$it.mp4") }
+        oldestUri?.let {
             try {
-                context.contentResolver.openInputStream(oldestUri)?.close()
-                val deleted = context.contentResolver.delete(oldestUri, null, null)
-                if (deleted > 0) {
-                    Log.d("DeleteVideo", "Deleted: $oldestUri")
-                    uriList.removeAt(0)
-                } else {
-                    Log.e("DeleteVideo", "Delete failed: $oldestUri")
-                }
+                context.contentResolver.openInputStream(it)?.close()
+                val deleted = context.contentResolver.delete(it, null, null)
+                if (deleted > 0) Log.d("DeleteVideo", "Deleted: $it")
+                else Log.e("DeleteVideo", "Delete failed: $it")
             } catch (e: Exception) {
-                Log.e("DeleteVideo", "File not found, reinitializing list", e)
-                refreshUriList(context, uriList)
+                Log.e("DeleteVideo", "Error deleting video: $it", e)
             }
         }
     }
-    private fun renameVideos(context: Context, uriList: MutableList<Uri>) {
-        val updatedList = mutableListOf<Uri>()
-        for ((index, uri) in uriList.withIndex()) {
-            val newName = "$index.mp4"
+
+    private fun renameVideos(context: Context) {
+        val existingUris = (0..5).mapNotNull { findVideoUriByName(context, "$it.mp4") }
+
+        existingUris.forEachIndexed { index, uri ->
             try {
-                context.contentResolver.openInputStream(uri)?.close()
+                val newName = "$index.mp4"
                 val contentValues = ContentValues().apply {
                     put(MediaStore.Video.Media.DISPLAY_NAME, newName)
                 }
                 val updated = context.contentResolver.update(uri, contentValues, null, null)
-                if (updated > 0) {
-                    Log.d("RenameVideos", "Renamed to $newName")
-                    findVideoUriByName(context, newName)?.let { updatedList.add(it) }
-                }
+                if (updated > 0) Log.d("RenameVideos", "Renamed to $newName")
             } catch (e: Exception) {
                 Log.e("RenameVideos", "Failed to rename: $uri", e)
             }
         }
-        uriList.clear()
-        uriList.addAll(updatedList)
     }
 
+    private fun getNextAvailableFileName(context: Context): String {
+        val usedNames = getUsedFileNames(context)
+        return (0..5).map { "$it.mp4" }.firstOrNull { it !in usedNames } ?: "0.mp4"
+    }
+
+    private fun getUsedFileNames(context: Context): Set<String> =
+        (0..5).mapNotNull { i ->
+            val name = "$i.mp4"
+            if (findVideoUriByName(context, name) != null) name else null
+        }.toSet()
 
     private fun findVideoUriByName(context: Context, fileName: String): Uri? {
         val projection = arrayOf(MediaStore.Video.Media._ID)
         val selection = "${MediaStore.Video.Media.DISPLAY_NAME} = ?"
         val selectionArgs = arrayOf(fileName)
-
         val queryUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
 
         context.contentResolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
@@ -308,23 +287,7 @@ class CameraViewModel : ViewModel() {
         return null
     }
 
-    private fun initializeUriList(context: Context, uriList: MutableList<Uri>) {
-        // Clear the list to avoid duplicates
-        uriList.clear()
 
-        // Check for files named 0.mp4 to 5.mp4
-        for (i in 0..5) {
-            val fileName = "$i.mp4"
-            val fileUri = findVideoUriByName(context, fileName)
-
-            // If a file exists, add it to the uriList
-            if (fileUri != null) {
-                uriList.add(fileUri)
-                Log.d("InitializeUriList", "Added existing video: $fileName")
-            }
-        }
-        Log.d("InitializeUriList", "URI list initialized with ${uriList.size} items.")
-    }
 
     override fun onCleared() {
         super.onCleared()

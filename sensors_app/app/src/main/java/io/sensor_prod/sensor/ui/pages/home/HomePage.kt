@@ -13,8 +13,12 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -377,7 +381,6 @@ fun HomePage(
                                     .weight(1f)
                             )
                         }
-
                     }
                 }
                 Spacer(modifier = Modifier.height(JlResDimens.dp8))
@@ -387,30 +390,30 @@ fun HomePage(
             item { Spacer(modifier = Modifier.height(JlResDimens.dp16)) }
         }
     }
-    if(potholeDetected.value) {
-        AnimatedVisibility(
-            visible = potholeDetected.value,
-            enter = scaleIn(),
-            exit = scaleOut(),
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-                .background(Color.Red.copy(alpha = 0.8f), shape = RoundedCornerShape(8.dp))
-                .padding(16.dp)
+    AnimatedVisibility(
+        visible = potholeDetected.value,
+        enter = expandVertically(animationSpec = tween(durationMillis = 900)), // 1 second
+        exit = shrinkVertically(animationSpec = tween(durationMillis = 900)), // 1 second
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start= 290.dp, top = 12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth()
+                .background(Color.Red.copy(alpha = 0.7f), shape = RoundedCornerShape(8.dp))
+                .padding(6.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(Icons.Default.Warning, contentDescription = "Warning", tint = Color.White)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Pothole detected! Recording started.",
-                    color = Color.White,
-                    style = JlResTxtStyles.h4
-                )
-            }
+            Icon(Icons.Default.Warning, contentDescription = "Warning", tint = Color.White,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Pothole detected!",
+                color = Color.White,
+                style = JlResTxtStyles.p3
+            )
         }
     }
 }
