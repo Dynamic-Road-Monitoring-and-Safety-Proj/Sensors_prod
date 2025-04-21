@@ -145,7 +145,7 @@ fun HomePage(
 
     Scaffold(topBar = {
 
-        SmallTopAppBar(
+        TopAppBar(
 
 //            backgroundColor = Color.Transparent,
             colors = if (!isAtTop.value) TopAppBarDefaults.mediumTopAppBarColors(
@@ -247,7 +247,7 @@ fun HomePage(
         LazyColumn(
 
             modifier = Modifier
-                .consumedWindowInsets(it)
+                .consumeWindowInsets(it)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
