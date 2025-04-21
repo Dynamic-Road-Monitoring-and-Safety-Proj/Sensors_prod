@@ -145,6 +145,9 @@ class CameraViewModel : ViewModel() {
     private fun startRecording() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
+                if(isRecording == true) {
+                    recording?.stop()
+                }
                 val result = captureVideo(videoCapture, context, uriList)
 
                 CoroutineScope(Dispatchers.Main).launch {
@@ -177,16 +180,13 @@ class CameraViewModel : ViewModel() {
         context: Context,
         uriList: MutableList<Uri>
     ): Pair<PendingRecording, Consumer<VideoRecordEvent>> {
-        val name: String
 
-        if (uriList.size >= 6) {
-            // Circular buffer: when there are 6 videos, delete the oldest and rename the others
+        val name = if (uriList.size >= 6) {
             deleteOldestVideo(context, uriList)
-            renameVideos(context, uriList)  // Renames from 0.mp4 to 4.mp4
-            name = "5.mp4"  // New video will be named "5.mp4"
+            renameVideos(context, uriList)
+            getNextAvailableFileName(context)
         } else {
-            // If the list size is less than 6, name videos sequentially from "0.mp4" to "4.mp4"
-            name = "${uriList.size}.mp4"
+            getNextAvailableFileName(context)
         }
 
         val existingUri = findVideoUriByName(context, name)
@@ -213,17 +213,10 @@ class CameraViewModel : ViewModel() {
                 }
                 is VideoRecordEvent.Finalize -> {
                     if (event.error == VideoRecordEvent.Finalize.ERROR_NONE) {
-//                        Log.d("CameraViewModel", "Video recording succeeded: ${event.outputResults.outputUri}")
-
-                        CoroutineScope(Dispatchers.Main).launch {
-//                            Toast.makeText(context, "URI is ${event.outputResults.outputUri}", Toast.LENGTH_LONG).show()
-                        }
-
-                        val videoUri = event.outputResults.outputUri
-                        // Now add this new video to the list
-                        uriList.add(videoUri)
+                        uriList.add(event.outputResults.outputUri)
                     } else {
-                        Log.e("CameraViewModel", "Video recording failed: ${event.cause}")
+                        Log.e("CameraViewModel", "Recording failed: ${event.cause}")
+                        refreshUriList(context, uriList)
                     }
                 }
                 else -> {
@@ -237,41 +230,67 @@ class CameraViewModel : ViewModel() {
             .withAudioEnabled()
         return Pair(recording, captureListener)
     }
+    private fun refreshUriList(context: Context, uriList: MutableList<Uri>) {
+        uriList.clear()
+        for (i in 0..5) {
+            findVideoUriByName(context, "$i.mp4")?.let { uriList.add(it) }
+        }
+    }
+    private fun getNextAvailableFileName(context: Context): String {
+        val usedNames = mutableSetOf<String>()
+        for (i in 0..5) {
+            if (findVideoUriByName(context, "$i.mp4") != null) {
+                usedNames.add("$i.mp4")
+            }
+        }
+        for (i in 0..5) {
+            val name = "$i.mp4"
+            if (!usedNames.contains(name)) return name
+        }
+        return "0.mp4" // fallback
+    }
+
 
     private fun deleteOldestVideo(context: Context, uriList: MutableList<Uri>) {
         if (uriList.isNotEmpty()) {
-            val oldestUri = uriList[0]
-            val deleted = context.contentResolver.delete(oldestUri, null, null)
-            if (deleted > 0) {
-                Log.d("DeleteVideo", "Deleted oldest video: $oldestUri")
-                uriList.removeAt(0)
-            } else {
-                Log.e("DeleteVideo", "Failed to delete oldest video: $oldestUri")
-            }
-        }
-    }
-
-    private fun renameVideos(context: Context, uriList: MutableList<Uri>) {
-        for (i in uriList.indices) {
-            val oldUri = uriList[i]
-            val newName = "$i.mp4"
-            val contentValues = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, newName)
-            }
-
+            val oldestUri = uriList.first()
             try {
-                // Ensure the file exists before renaming
-                context.contentResolver.openInputStream(oldUri)?.close() ?: run {
-                    Log.e("RenameVideos", "File does not exist, skipping rename: $oldUri")
+                context.contentResolver.openInputStream(oldestUri)?.close()
+                val deleted = context.contentResolver.delete(oldestUri, null, null)
+                if (deleted > 0) {
+                    Log.d("DeleteVideo", "Deleted: $oldestUri")
+                    uriList.removeAt(0)
+                } else {
+                    Log.e("DeleteVideo", "Delete failed: $oldestUri")
                 }
-
-                context.contentResolver.update(oldUri, contentValues, null, null)
-                Log.d("RenameVideos", "Renamed file: $oldUri to $newName")
             } catch (e: Exception) {
-                Log.e("RenameVideos", "Error renaming video: $oldUri", e)
+                Log.e("DeleteVideo", "File not found, reinitializing list", e)
+                refreshUriList(context, uriList)
             }
         }
     }
+    private fun renameVideos(context: Context, uriList: MutableList<Uri>) {
+        val updatedList = mutableListOf<Uri>()
+        for ((index, uri) in uriList.withIndex()) {
+            val newName = "$index.mp4"
+            try {
+                context.contentResolver.openInputStream(uri)?.close()
+                val contentValues = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, newName)
+                }
+                val updated = context.contentResolver.update(uri, contentValues, null, null)
+                if (updated > 0) {
+                    Log.d("RenameVideos", "Renamed to $newName")
+                    findVideoUriByName(context, newName)?.let { updatedList.add(it) }
+                }
+            } catch (e: Exception) {
+                Log.e("RenameVideos", "Failed to rename: $uri", e)
+            }
+        }
+        uriList.clear()
+        uriList.addAll(updatedList)
+    }
+
 
     private fun findVideoUriByName(context: Context, fileName: String): Uri? {
         val projection = arrayOf(MediaStore.Video.Media._ID)

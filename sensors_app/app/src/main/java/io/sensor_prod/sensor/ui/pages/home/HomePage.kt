@@ -387,6 +387,32 @@ fun HomePage(
             item { Spacer(modifier = Modifier.height(JlResDimens.dp16)) }
         }
     }
+    if(potholeDetected.value) {
+        AnimatedVisibility(
+            visible = potholeDetected.value,
+            enter = scaleIn(),
+            exit = scaleOut(),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+                .background(Color.Red.copy(alpha = 0.8f), shape = RoundedCornerShape(8.dp))
+                .padding(16.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(Icons.Default.Warning, contentDescription = "Warning", tint = Color.White)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "Pothole detected! Recording started.",
+                    color = Color.White,
+                    style = JlResTxtStyles.h4
+                )
+            }
+        }
+    }
 }
 
 @Composable
