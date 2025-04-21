@@ -1,6 +1,10 @@
 package io.sensor_prod.sensor.ui.pages.home
 
+import android.Manifest
 import android.content.Context
+import android.util.Log
+import android.widget.Toast
+import androidx.annotation.RequiresPermission
 import androidx.camera.core.CameraSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.Quality
@@ -9,8 +13,12 @@ import androidx.camera.video.Recorder
 import androidx.camera.video.VideoCapture
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.shrinkHorizontally
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -22,10 +30,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material.icons.rounded.AddChart
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -49,9 +59,13 @@ import io.sensor_prod.sensor.ui.pages.home.items.HomeSensorItem
 import io.sensor_prod.sensor.ui.resource.values.JlResDimens
 import io.sensor_prod.sensor.ui.resource.values.JlResShapes
 import io.sensor_prod.sensor.ui.resource.values.JlResTxtStyles
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
+@RequiresPermission(Manifest.permission.RECORD_AUDIO)
 @OptIn(
     ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalTextApi::class,
     ExperimentalPagerApi::class, ExperimentalAnimationApi::class
@@ -64,7 +78,11 @@ fun HomePage(
         factory = HomeViewModel.Factory()
     )
 ) {
+
     val context = LocalContext.current
+    viewModel.initModel(context = context)
+    viewModel.startGyroListening(context)
+
     val camVM: CameraViewModel = viewModel(
         factory = CameraViewModel.Factory()
     )
@@ -84,6 +102,7 @@ fun HomePage(
         val cameraProvider = context.getCameraProvider()
         cameraProvider.unbindAll()
         cameraProvider.bindToLifecycle(lifecycleOwner, cameraxSelector, videoCapture)
+        camVM.startRecordingClips()
     }
 
     val lazyListState = rememberLazyListState()
@@ -91,6 +110,8 @@ fun HomePage(
 //    val sensors = remember { sensorsProvider }
 
     val sensorUiState = viewModel.mUiState.collectAsState()
+    val potholeDetected = viewModel.potholeDetected.collectAsState()
+    Log.d("HomePage", "potholeDetected ${potholeDetected.value}")
 //    var sensorUiState = viewModel.mUiCurrentSensorState.collectAsState()
 
     val isAtTop = remember {
@@ -99,9 +120,25 @@ fun HomePage(
         }
     }
 
-    val pagerState = rememberPagerState(
-//        pageCount = 3,
-    )
+    LaunchedEffect(potholeDetected.value) {
+        if (potholeDetected.value) {
+            withContext(Dispatchers.Main) {
+                try {
+                    camVM.triggerEventRecording()
+                } catch (e: Exception) {
+                    Log.e("Recording", "Error: ${e.message}", e)
+                }
+            }
+
+            // Toast must run on Main thread
+            Toast.makeText(
+                context,
+                "Pothole detected! Recording started.",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
 
 
 //    Log.d("HomePage", "sensor ${sensorsUiState.value.sensors}");
@@ -116,7 +153,6 @@ fun HomePage(
             ) else TopAppBarDefaults.mediumTopAppBarColors(
                 containerColor = Color.Transparent //Add your own color here, just to clarify.
             ),
-
 
             navigationIcon = {
                 Box(Modifier.padding(horizontal = JlResDimens.dp20)) {
@@ -154,45 +190,58 @@ fun HomePage(
                     )
                 }
             },
-
             )
     },
         floatingActionButton = {
-
-            AnimatedVisibility(
-                visible = lazyListState.isScrollingUp(),
-                enter = scaleIn(),
-                exit = scaleOut()
+            Column(
+                verticalArrangement = Arrangement.spacedBy(16.dp), // <-- Adds space between FABs
+                modifier = Modifier.padding(bottom = 16.dp)
             ) {
                 Column {
                     ToggleableFAB(viewModel)
-                    // Video Recording Button
                     FloatingActionButton(
-                        onClick = { camVM.startRecordingClips() },  // instead call toggleVideo recording for toggle functinoalities
+                        onClick = { camVM.triggerEventRecording() }, // TODO add functionality trigger
                         shape = RoundedCornerShape(50),
-                        containerColor = Color.Red,
+                        containerColor = if (camVM.isRecording) Color.Red else Color.Blue,
                         modifier = Modifier
                             .padding(bottom = 16.dp)
                             .background(
                                 brush = Brush.linearGradient(
-                                    colors = listOf(Color.Red.copy(alpha = 0.8f), Color.Red.copy(alpha = 0.5f))
+                                    colors = if (camVM.isRecording)
+                                        listOf(
+                                            Color.Red.copy(alpha = 0.8f),
+                                            Color.Red.copy(alpha = 0.5f)
+                                        )
+                                    else
+                                        listOf(
+                                            Color.Blue.copy(alpha = 0.8f),
+                                            Color.Blue.copy(alpha = 0.5f)
+                                        )
                                 ),
                                 shape = RoundedCornerShape(50.dp)
                             )
                             .border(
                                 brush = Brush.verticalGradient(
-                                    listOf(Color.Black.copy(alpha = 0.1f), Color.Black.copy(alpha = 0.3f))
+                                    colors = if (camVM.isRecording)
+                                        listOf(
+                                            Color.Black.copy(alpha = 0.1f),
+                                            Color.Black.copy(alpha = 0.3f)
+                                        )
+                                    else
+                                        listOf(
+                                            Color.White.copy(alpha = 0.1f),
+                                            Color.White.copy(alpha = 0.3f)
+                                        )
                                 ),
                                 width = JlResDimens.dp1,
                                 shape = RoundedCornerShape(50.dp)
                             )
                     ) {
-                        Icon(Icons.Rounded.Videocam,"Record Video", tint = Color.White)
+                        Icon(Icons.Rounded.Videocam, "Record Video", tint = Color.White)
                     }
                 }
             }
         }
-
     ) {
 
         LazyColumn(
@@ -332,7 +381,6 @@ fun HomePage(
                                     .weight(1f)
                             )
                         }
-
                     }
                 }
                 Spacer(modifier = Modifier.height(JlResDimens.dp8))
@@ -340,9 +388,33 @@ fun HomePage(
             }
 
             item { Spacer(modifier = Modifier.height(JlResDimens.dp16)) }
-//            }
         }
-
+    }
+    AnimatedVisibility(
+        visible = potholeDetected.value,
+        enter = expandVertically(animationSpec = tween(durationMillis = 900)), // 1 second
+        exit = shrinkVertically(animationSpec = tween(durationMillis = 900)), // 1 second
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start= 290.dp, top = 12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.fillMaxWidth()
+                .background(Color.Red.copy(alpha = 0.7f), shape = RoundedCornerShape(8.dp))
+                .padding(6.dp)
+        ) {
+            Icon(Icons.Default.Warning, contentDescription = "Warning", tint = Color.White,
+                modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = "Pothole detected!",
+                color = Color.White,
+                style = JlResTxtStyles.p3
+            )
+        }
     }
 }
 
@@ -350,7 +422,6 @@ fun HomePage(
 fun Factory() {
     TODO("Not yet implemented")
 }
-
 @Composable
 fun ToggleableFAB(viewModel: HomeViewModel) {
     var isLogging by remember { mutableStateOf(false) }

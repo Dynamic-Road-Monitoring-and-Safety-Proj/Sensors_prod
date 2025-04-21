@@ -2,6 +2,7 @@ package io.sensor_prod.sensor.ui.pages.home
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -22,24 +23,31 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
+import java.io.FileOutputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.Executors
 
 class CameraViewModel : ViewModel() {
-    private var isRecording = false
+    var isRecording = false
     private lateinit var videoCapture: VideoCapture<Recorder>
-    private val uriList: MutableList<Uri> = mutableListOf()
     private var recording: Recording? = null
     private val executor = Executors.newCachedThreadPool()
     @SuppressLint("StaticFieldLeak")
     private lateinit var context: Context
+    private var isTriggerRecordingInProgress = false
 
-
+    // Utility functions
     fun initialize(context: Context, videoCapture: VideoCapture<Recorder>) {
         this.context = context
         this.videoCapture = videoCapture
-        initializeUriList(context, uriList)
     }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
@@ -52,26 +60,108 @@ class CameraViewModel : ViewModel() {
         isRecording = !isRecording
     }
 
+    private var isClipping = false
+    private var clippingJob: Job? = null
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
-    fun startRecordingClips(){
-        viewModelScope.launch {
-            while (true){
-                startRecording()
-                delay(6000)
-                stopRecording()
+    fun startRecordingClips() {
+        if (isClipping) {
+            // Stop clipping
+            isClipping = false
+            clippingJob?.cancel()
+            stopRecording()
+        } else {
+            // Start clipping
+            isClipping = true
+            clippingJob = viewModelScope.launch {
+                while (isActive && isClipping) {
+                    startRecording()
+                    delay(6000)
+                    stopRecording()
+                }
             }
-
         }
     }
+
+    @RequiresPermission(Manifest.permission.RECORD_AUDIO)
+    fun triggerEventRecording() {
+        if (isTriggerRecordingInProgress) return
+
+        isTriggerRecordingInProgress = true
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (isRecording) {
+                    recording?.stop()
+                }
+
+                delay(500)
+
+                val targetFolder = "Movies/trigger_recordings"
+
+                // Ensure target folder is recognized/mounted
+                context.contentResolver.query(
+                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                    arrayOf(MediaStore.Video.Media._ID),
+                    "${MediaStore.Video.Media.RELATIVE_PATH} = ?",
+                    arrayOf(targetFolder),
+                    null
+                )?.close()
+
+                val latestUris = getLatestVideos(context, 2)
+
+                latestUris.forEachIndexed { index, uri ->
+                    val inputStream = context.contentResolver.openInputStream(uri)
+                    if (inputStream != null) {
+                        val timestamp = SimpleDateFormat("yyyyMMdd_HH:mm:ss", Locale.US).format(Date())
+                        val triggerFileName = "trigger_${index}_$timestamp.mp4"
+
+                        val contentValues = ContentValues().apply {
+                            put(MediaStore.Video.Media.DISPLAY_NAME, triggerFileName)
+                            put(MediaStore.Video.Media.RELATIVE_PATH, targetFolder)
+                            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                        }
+
+                        val triggerUri = context.contentResolver.insert(
+                            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+                            contentValues
+                        )
+
+                        triggerUri?.let { destUri ->
+                            context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
+                                inputStream.copyTo(outputStream)
+                                Log.d("TriggerSave", "Saved trigger clip as: $triggerFileName")
+                            }
+                            inputStream.close()
+                        }
+                    } else {
+                        Log.e("TriggerSave", "Failed to open input stream for video at index $index")
+                    }
+                }
+
+                if (!isRecording && !isClipping) {
+                    startRecording()
+                }
+            } catch (e: Exception) {
+                Log.e("TriggerSave", "Exception during trigger save: ${e.message}", e)
+            } finally {
+                delay(2000)
+                isTriggerRecordingInProgress = false
+            }
+        }
+    }
+
+    // Helper Functions
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun startRecording() {
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val result = captureVideo(videoCapture, context, uriList)
+                if(isRecording == true) {
+                    recording?.stop()
+                }
+                val result = captureVideo(videoCapture, context)
 
                 CoroutineScope(Dispatchers.Main).launch {
-                    Toast.makeText(context, "Recording started", Toast.LENGTH_SHORT).show()
+//                    Toast.makeText(context, "Recording started", Toast.LENGTH_SHORT).show()
                 }
 
                 val pendingRecording = result.first
@@ -90,67 +180,70 @@ class CameraViewModel : ViewModel() {
         recording = null
 
         CoroutineScope(Dispatchers.Main).launch {
-            Toast.makeText(context, "Recording stopped", Toast.LENGTH_SHORT).show()
+//            Toast.makeText(context, "Recording stopped", Toast.LENGTH_SHORT).show()
         }
+    }
+    private fun getLatestVideos(context: Context, count: Int): List<Uri> {
+        val uris = mutableListOf<Uri>()
+        val projection = arrayOf(
+            MediaStore.Video.Media._ID,
+            MediaStore.Video.Media.DATE_ADDED
+        )
+
+        val selection = "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
+        val selectionArgs = arrayOf("%Movies/dashcam_clips%") // Or the actual folder path you're using
+
+        val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC" // ✅ Removed LIMIT
+
+        val cursor = context.contentResolver.query(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            projection,
+            selection,
+            selectionArgs,
+            sortOrder
+        )
+
+        cursor?.use {
+            val idIndex = it.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+            while (it.moveToNext() && uris.size < count) {
+                val id = it.getLong(idIndex)
+                val uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                uris.add(uri)
+            }
+        }
+
+        return uris
     }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun captureVideo(
         videoCapture: VideoCapture<Recorder>,
-        context: Context,
-        uriList: MutableList<Uri>
+        context: Context
     ): Pair<PendingRecording, Consumer<VideoRecordEvent>> {
-        val name: String
 
-        if (uriList.size >= 6) {
-            // Circular buffer: when there are 6 videos, delete the oldest and rename the others
-            deleteOldestVideo(context, uriList)
-            renameVideos(context, uriList)  // Renames from 0.mp4 to 4.mp4
-            name = "5.mp4"  // New video will be named "5.mp4"
-        } else {
-            // If the list size is less than 6, name videos sequentially from "0.mp4" to "4.mp4"
-            name = "${uriList.size}.mp4"
-        }
+        val timestamp = SimpleDateFormat("yyyyMMdd_HH:mm:ss", Locale.US).format(Date())
+        val fileName = "clip_$timestamp.mp4"
+        val targetFolder = "Movies/dashcam_"
 
-        val existingUri = findVideoUriByName(context, name)
-        if (existingUri != null) {
-            context.contentResolver.delete(existingUri, null, null)  // Delete existing file
-            Log.d("CameraViewModel", "Deleted existing video: $name")
-        }
+        deleteOldestVideosIfNeeded(context, targetFolder, maxFiles = 15)
 
         val contentValues = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, name)
+            put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+            put(MediaStore.Video.Media.RELATIVE_PATH, targetFolder)
         }
 
         val mediaStoreOutput = MediaStoreOutputOptions.Builder(
             context.contentResolver,
             MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        )
-            .setContentValues(contentValues)
-            .build()
+        ).setContentValues(contentValues).build()
 
         val captureListener = Consumer<VideoRecordEvent> { event ->
-            when (event) {
-                is VideoRecordEvent.Start -> {
-                    Log.d("CameraViewModel", "Recording started")
-                }
-                is VideoRecordEvent.Finalize -> {
-                    if (event.error == VideoRecordEvent.Finalize.ERROR_NONE) {
-                        Log.d("CameraViewModel", "Video recording succeeded: ${event.outputResults.outputUri}")
-
-                        CoroutineScope(Dispatchers.Main).launch {
-                            Toast.makeText(context, "URI is ${event.outputResults.outputUri}", Toast.LENGTH_LONG).show()
-                        }
-
-                        val videoUri = event.outputResults.outputUri
-                        // Now add this new video to the list
-                        uriList.add(videoUri)
-                    } else {
-                        Log.e("CameraViewModel", "Video recording failed: ${event.cause}")
-                    }
-                }
-                else -> {
-                    // Handle other events if needed
+            if (event is VideoRecordEvent.Finalize) {
+                if (event.error != VideoRecordEvent.Finalize.ERROR_NONE) {
+                    Log.e("CameraViewModel", "Recording failed: ${event.cause}")
+                } else {
+                    Log.d("CameraViewModel", "Saved recording: $fileName")
                 }
             }
         }
@@ -158,76 +251,54 @@ class CameraViewModel : ViewModel() {
         val recording = videoCapture.output
             .prepareRecording(context, mediaStoreOutput)
             .withAudioEnabled()
+
         return Pair(recording, captureListener)
     }
+    private fun deleteOldestVideosIfNeeded(context: Context, relativePath: String, maxFiles: Int) {
+        val videoList = mutableListOf<Triple<Uri, Long, String>>() // Triple: URI, date, name
 
-    private fun deleteOldestVideo(context: Context, uriList: MutableList<Uri>) {
-        if (uriList.isNotEmpty()) {
-            val oldestUri = uriList[0]
-            val deleted = context.contentResolver.delete(oldestUri, null, null)
-            if (deleted > 0) {
-                Log.d("DeleteVideo", "Deleted oldest video: $oldestUri")
-                uriList.removeAt(0)
-            } else {
-                Log.e("DeleteVideo", "Failed to delete oldest video: $oldestUri")
+        val projection = arrayOf(
+            MediaStore.Video.Media._ID,
+            MediaStore.Video.Media.DATE_MODIFIED,
+            MediaStore.Video.Media.DISPLAY_NAME
+        )
+
+        val selection = "${MediaStore.Video.Media.RELATIVE_PATH} = ?"
+        val selectionArgs = arrayOf("$relativePath/")
+
+        val sortOrder = "${MediaStore.Video.Media.DATE_MODIFIED} ASC" // Oldest first
+
+        val query = context.contentResolver.query(
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
+            projection,
+            selection,
+            selectionArgs,
+            sortOrder
+        )
+
+        query?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
+            val dateCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_MODIFIED)
+            val nameCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
+
+            while (cursor.moveToNext()) {
+                val id = cursor.getLong(idCol)
+                val date = cursor.getLong(dateCol)
+                val name = cursor.getString(nameCol)
+                val uri = ContentUris.withAppendedId(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id)
+                videoList.add(Triple(uri, date, name))
             }
         }
-    }
 
-    private fun renameVideos(context: Context, uriList: MutableList<Uri>) {
-        for (i in uriList.indices) {
-            val oldUri = uriList[i]
-            val newName = "$i.mp4"
-            val contentValues = ContentValues().apply {
-                put(MediaStore.Video.Media.DISPLAY_NAME, newName)
-            }
+        if (videoList.size > maxFiles) {
+            val toDeleteCount = minOf(10, videoList.size - maxFiles)
+            val toDelete = videoList.take(toDeleteCount)
 
-            try {
-                // Ensure the file exists before renaming
-                context.contentResolver.openInputStream(oldUri)?.close() ?: run {
-                    Log.e("RenameVideos", "File does not exist, skipping rename: $oldUri")
-                }
-
-                context.contentResolver.update(oldUri, contentValues, null, null)
-                Log.d("RenameVideos", "Renamed file: $oldUri to $newName")
-            } catch (e: Exception) {
-                Log.e("RenameVideos", "Error renaming video: $oldUri", e)
+            toDelete.forEach {
+                context.contentResolver.delete(it.first, null, null)
+                Log.d("CameraViewModel", "Deleted old video: ${it.third}") // file name
             }
         }
-    }
-
-    private fun findVideoUriByName(context: Context, fileName: String): Uri? {
-        val projection = arrayOf(MediaStore.Video.Media._ID)
-        val selection = "${MediaStore.Video.Media.DISPLAY_NAME} = ?"
-        val selectionArgs = arrayOf(fileName)
-
-        val queryUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-
-        context.contentResolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID))
-                return Uri.withAppendedPath(queryUri, id.toString())
-            }
-        }
-        return null
-    }
-
-    private fun initializeUriList(context: Context, uriList: MutableList<Uri>) {
-        // Clear the list to avoid duplicates
-        uriList.clear()
-
-        // Check for files named 0.mp4 to 5.mp4
-        for (i in 0..5) {
-            val fileName = "$i.mp4"
-            val fileUri = findVideoUriByName(context, fileName)
-
-            // If a file exists, add it to the uriList
-            if (fileUri != null) {
-                uriList.add(fileUri)
-                Log.d("InitializeUriList", "Added existing video: $fileName")
-            }
-        }
-        Log.d("InitializeUriList", "URI list initialized with ${uriList.size} items.")
     }
 
     override fun onCleared() {

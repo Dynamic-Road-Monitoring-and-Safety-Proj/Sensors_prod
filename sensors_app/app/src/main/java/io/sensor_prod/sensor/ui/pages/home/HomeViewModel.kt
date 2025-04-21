@@ -1,10 +1,15 @@
 package io.sensor_prod.sensor.ui.pages.home
 
 import android.annotation.SuppressLint
+import android.content.Context
 import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.os.Build
 import android.os.Environment
 import android.util.Log
+import androidx.annotation.RequiresApi
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
@@ -23,6 +28,15 @@ import java.io.BufferedWriter
 import java.io.File
 import java.io.FileWriter
 import androidx.core.util.size
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import org.tensorflow.lite.Interpreter
+import java.io.FileInputStream
+import java.nio.MappedByteBuffer
+import java.nio.channels.FileChannel
+import kotlin.math.abs
+import kotlin.math.pow
+import kotlin.math.sqrt
 
 
 class HomeViewModel : ViewModel() {
@@ -30,13 +44,134 @@ class HomeViewModel : ViewModel() {
 //    private var mLogTimestamp: Long = 0
 
     private var mSensors: MutableList<ModelHomeSensor> = mutableListOf()
+    private var lastDetectionTime = 0L
+    private val cooldownMillis = 5000L // 5 seconds
+
+
+    // Prophet vars
+    private lateinit var interpreter: Interpreter
+    private val buffer = ArrayDeque<Float>()
+    private val WINDOW_SIZE = 10
+    private val THRESH_MULTIPLIER = 2f
+    private var threshold = 0f
+    private val errorBuffer = mutableListOf<Float>()
+
+    fun initModel(context: Context) {
+        val model = loadModelFile(context, "model_rms.tflite")
+        interpreter = Interpreter(model)
+    }
+
+    private fun loadModelFile(context: Context, modelName: String): MappedByteBuffer {
+        val assetFileDescriptor = context.assets.openFd(modelName)
+        val inputStream = FileInputStream(assetFileDescriptor.fileDescriptor)
+        val fileChannel = inputStream.channel
+        return fileChannel.map(
+            FileChannel.MapMode.READ_ONLY,
+            assetFileDescriptor.startOffset,
+            assetFileDescriptor.declaredLength
+        )
+    }
+    fun startMonitoringSensors() {
+        viewModelScope.launch {
+            while (isActive) {
+                checkPotholeFromSensors()
+                delay(500L)
+            }
+        }
+    }
+
+
+    private val gyroscopeValues = mutableListOf<Float>()
+
+    private val sensorEventListener = object : SensorEventListener {
+        @RequiresApi(Build.VERSION_CODES.VANILLA_ICE_CREAM)
+        override fun onSensorChanged(event: SensorEvent?) {
+            event?.let {
+                if (event.sensor.type == Sensor.TYPE_GYROSCOPE) {
+                    val x = event.values[0]
+                    val y = event.values[1]
+                    val z = event.values[2]
+
+                    // Calculate the magnitude of angular velocity
+                    val magnitude = sqrt(x * x + y * y + z * z)
+
+                    // Maintain a window of values
+                    if (gyroscopeValues.size >= WINDOW_SIZE) {
+                        gyroscopeValues.removeFirst()
+                    }
+                    gyroscopeValues.add(magnitude)
+
+                    checkPotholeFromSensors()
+                }
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
+
+    private val _potholeDetected = MutableStateFlow(false)
+    val potholeDetected: StateFlow<Boolean> = _potholeDetected.asStateFlow()
+
+    fun startGyroListening(context: Context) {
+        val sensorManager = context.getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        val gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE)
+        sensorManager.registerListener(sensorEventListener, gyroscope, SensorManager.SENSOR_DELAY_GAME)
+    }
+
+    private fun checkPotholeFromSensors() {
+        val now = System.currentTimeMillis()
+        if (now - lastDetectionTime < cooldownMillis) return  // 🚫 Early return if in cooldown
+
+        if (gyroscopeValues.size < WINDOW_SIZE) return
+
+        // Step 1: Calculate RMS
+        val rms = sqrt(gyroscopeValues.map { it * it }.average().toFloat())
+
+        // Step 2: Update buffer
+        if (buffer.size >= WINDOW_SIZE) buffer.removeFirst()
+        buffer.addLast(rms)
+
+        if (buffer.size == WINDOW_SIZE) {
+            // Step 3: Prepare input
+            val input = Array(1) { Array(WINDOW_SIZE) { FloatArray(1) } }
+            buffer.forEachIndexed { i, value -> input[0][i][0] = value }
+
+            // Step 4: Run model
+            val output = Array(1) { FloatArray(1) }
+            interpreter.run(input, output)
+
+            val predicted = output[0][0]
+            val error = abs(predicted - rms)
+
+            // Step 5: Threshold logic
+            updateThreshold(error)
+            val potholeDetected = error > threshold
+
+            if (potholeDetected) {
+                lastDetectionTime = now  // ✅ Cooldown begins now
+                _potholeDetected.value = true
+
+                Log.d("POTHOLE", "Anomaly Detected! Predicted=$predicted, RMS=$rms, Error=$error, Threshold=$threshold")
+            } else {
+                _potholeDetected.value = false
+            }
+        }
+    }
+
+    private fun updateThreshold(latestError: Float) {
+        errorBuffer.add(latestError)
+        if (errorBuffer.size > 100) errorBuffer.removeAt(0)
+
+        val mean = errorBuffer.average().toFloat()
+        val std = sqrt(errorBuffer.map { (it - mean).pow(2) }.average().toFloat())
+        threshold = mean + THRESH_MULTIPLIER * std
+    }
 
     // Game UI state
     private val _uiState = MutableStateFlow(HomeUiState())
 
     // Backing property to avoid state updates from other classes
     val mUiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
-
 
     /* private val _uiPagerState = MutableStateFlow(HomeUiState())
      // Backing property to avoid state updates from other classes
@@ -60,8 +195,6 @@ class HomeViewModel : ViewModel() {
 
     private val mIsActiveMap = mutableMapOf<Int, Boolean>(
         Pair(Sensor.TYPE_GYROSCOPE, true),
-//        Pair(Sensor.TYPE_ACCELEROMETER, true)
-        Pair(Sensor.TYPE_MAGNETIC_FIELD, true)
     )
 
     //    TODO use this in future private val mSensorPacketsMap = mutableMapOf<Int, ModelSensorPacket>()
@@ -75,6 +208,7 @@ class HomeViewModel : ViewModel() {
 //        Log.d("HomeViewModel", "viewmodel init")
 
         viewModelScope.launch {
+            startMonitoringSensors()
             SensorsProvider.getInstance().mSensorsFlow.map { value ->
                 value.map {
                     ModelHomeSensor(
@@ -99,9 +233,6 @@ class HomeViewModel : ViewModel() {
                     getInitialChartData()
                     initializeFlow()
                 }
-//                mSensorsList.emit(_mSensorsList)
-
-                /* emitUiState()*/
 
             }
 
@@ -266,7 +397,6 @@ class HomeViewModel : ViewModel() {
 
         var index = mSensors.indexOfFirst { it.type == type }
         if (index >= 0) {
-//            Log.d("HomeViewModel", "onSensorChecked: Index: $index $isChecked")
             var sensor = mSensors[index]
             var updatedSensor =
                 ModelHomeSensor(sensor.type, sensor.sensor, sensor.info, sensor.valueRms, isChecked)
@@ -276,11 +406,6 @@ class HomeViewModel : ViewModel() {
             updateActiveSensor(updatedSensor, isChecked)
 
         }
-        /*viewModelScope.launch {
-            emitUiState()
-
-        }*/
-
     }
 
     private fun updateActiveSensor(sensor: ModelHomeSensor, isChecked: Boolean = false) {
