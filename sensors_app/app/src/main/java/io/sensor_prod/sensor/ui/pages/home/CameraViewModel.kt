@@ -211,6 +211,7 @@ class CameraViewModel : ViewModel() {
                 uris.add(uri)
             }
         }
+
         return uris
     }
 
