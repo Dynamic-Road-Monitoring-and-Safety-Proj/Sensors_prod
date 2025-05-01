@@ -88,6 +88,7 @@ class CameraViewModel : ViewModel() {
 
         isTriggerRecordingInProgress = true
         viewModelScope.launch(Dispatchers.IO) {
+            startRecordingClips() // this one stops the process
             try {
                 if (isRecording) {
                     recording?.stop()
@@ -137,9 +138,9 @@ class CameraViewModel : ViewModel() {
                     }
                 }
 
-//                if (!isRecording && !isClipping) {
-//                    startRecordingClips()
-//                }
+                if (!isRecording && !isClipping) {
+                    startRecordingClips()
+                }
             } catch (e: Exception) {
                 Log.e("TriggerSave", "Exception during trigger save: ${e.message}", e)
             } finally {
@@ -190,8 +191,9 @@ class CameraViewModel : ViewModel() {
             MediaStore.Video.Media.DATE_ADDED
         )
 
-        val selection = "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
-        val selectionArgs = arrayOf("%Movies/dashcam_/clip_%") // Or the actual folder path you're using
+        val selection = "${MediaStore.Video.Media.RELATIVE_PATH} = ?"
+        val selectionArgs = arrayOf("Movies/dashcam_/")
+
 
         val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC" // ✅ Removed LIMIT
 
