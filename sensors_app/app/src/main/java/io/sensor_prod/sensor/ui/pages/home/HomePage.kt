@@ -200,7 +200,7 @@ fun HomePage(
                 Column {
                     ToggleableFAB(viewModel)
                     FloatingActionButton(
-                        onClick = { camVM.toggleVideoRecording() }, // TODO add functionality trigger
+                        onClick = { camVM.toggleVideoRecording()}, // TODO add functionality trigger
                         shape = RoundedCornerShape(50),
                         containerColor = if (camVM.isRecording) Color.Red else Color.Blue,
                         modifier = Modifier

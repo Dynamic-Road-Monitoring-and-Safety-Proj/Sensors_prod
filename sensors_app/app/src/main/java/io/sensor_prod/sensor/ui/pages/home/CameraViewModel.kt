@@ -53,8 +53,18 @@ class CameraViewModel : ViewModel() {
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun toggleVideoRecording() {
         if (isRecording) {
+            Toast.makeText(
+                context,
+                "Toggle Recording stopped",
+                Toast.LENGTH_SHORT
+            ).show()
             stopRecording()
         } else {
+            Toast.makeText(
+                context,
+                "Toggle Recording started",
+                Toast.LENGTH_SHORT
+            ).show()
             startRecording()
         }
         isRecording = !isRecording
@@ -223,7 +233,7 @@ class CameraViewModel : ViewModel() {
 
         val timestamp = SimpleDateFormat("yyyyMMdd_HH:mm:ss", Locale.US).format(Date())
         val fileName = "clip_$timestamp.mp4"
-        val targetFolder = "Movies/dashcam_"
+        val targetFolder = "Movies/toggle_Recordings"
 
         deleteOldestVideosIfNeeded(context, targetFolder, maxFiles = 15)
 
