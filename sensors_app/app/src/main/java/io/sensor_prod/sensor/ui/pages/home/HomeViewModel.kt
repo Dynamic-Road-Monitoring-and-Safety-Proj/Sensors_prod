@@ -127,44 +127,21 @@ class HomeViewModel : ViewModel() {
         // Step 1: Calculate RMS
         val rms = sqrt(gyroscopeValues.map { it * it }.average().toFloat())
 
-        // Step 2: Update buffer
+        // Step 2: Update buffer (optional if you still want a sliding window view)
         if (buffer.size >= WINDOW_SIZE) buffer.removeFirst()
         buffer.addLast(rms)
 
-        if (buffer.size == WINDOW_SIZE) {
-            // Step 3: Prepare input
-            val input = Array(1) { Array(WINDOW_SIZE) { FloatArray(1) } }
-            buffer.forEachIndexed { i, value -> input[0][i][0] = value }
+        // Step 3: Detection using static threshold
+        val potholeDetected = rms > 5.0f
 
-            // Step 4: Run model
-            val output = Array(1) { FloatArray(1) }
-            interpreter.run(input, output)
+        if (potholeDetected) {
+            lastDetectionTime = now  // ✅ Cooldown begins now
+            _potholeDetected.value = true
 
-            val predicted = output[0][0]
-            val error = abs(predicted - rms)
-
-            // Step 5: Threshold logic
-            updateThreshold(error)
-            val potholeDetected = error > threshold
-
-            if (potholeDetected) {
-                lastDetectionTime = now  // ✅ Cooldown begins now
-                _potholeDetected.value = true
-
-                Log.d("POTHOLE", "Anomaly Detected! Predicted=$predicted, RMS=$rms, Error=$error, Threshold=$threshold")
-            } else {
-                _potholeDetected.value = false
-            }
+            Log.d("POTHOLE", "Pothole Detected! RMS=$rms > 5.27")
+        } else {
+            _potholeDetected.value = false
         }
-    }
-
-    private fun updateThreshold(latestError: Float) {
-        errorBuffer.add(latestError)
-        if (errorBuffer.size > 100) errorBuffer.removeAt(0)
-
-        val mean = errorBuffer.average().toFloat()
-        val std = sqrt(errorBuffer.map { (it - mean).pow(2) }.average().toFloat())
-        threshold = mean + THRESH_MULTIPLIER * std
     }
 
     // Game UI state
