@@ -77,9 +77,23 @@ class CameraViewModel : ViewModel() {
             }
         }
     }
+    fun ensureFolderExists(context: Context, relativePath: String) {
+        val contentValues = ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, ".nomedia")
+            put(MediaStore.MediaColumns.MIME_TYPE, "application/octet-stream")
+            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+        }
+
+        val uri = context.contentResolver.insert(MediaStore.Files.getContentUri("external"), contentValues)
+        uri?.let {
+            context.contentResolver.openOutputStream(it)?.close()
+        }
+    }
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     fun triggerEventRecording() {
+        ensureFolderExists(context, "Movies/trigger_recordings")
+
         if (isTriggerRecordingInProgress) return
 
         isTriggerRecordingInProgress = true
