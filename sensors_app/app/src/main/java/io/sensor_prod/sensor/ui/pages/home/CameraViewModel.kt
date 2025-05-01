@@ -88,7 +88,6 @@ class CameraViewModel : ViewModel() {
 
         isTriggerRecordingInProgress = true
         viewModelScope.launch(Dispatchers.IO) {
-            startRecordingClips() // this one stops the process
             try {
                 if (isRecording) {
                     recording?.stop()
