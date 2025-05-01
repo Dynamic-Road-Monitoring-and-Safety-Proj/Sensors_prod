@@ -137,9 +137,9 @@ class CameraViewModel : ViewModel() {
                     }
                 }
 
-                if (!isRecording && !isClipping) {
-                    startRecording()
-                }
+//                if (!isRecording && !isClipping) {
+//                    startRecordingClips()
+//                }
             } catch (e: Exception) {
                 Log.e("TriggerSave", "Exception during trigger save: ${e.message}", e)
             } finally {
@@ -191,7 +191,7 @@ class CameraViewModel : ViewModel() {
         )
 
         val selection = "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
-        val selectionArgs = arrayOf("%Movies/dashcam_clips%") // Or the actual folder path you're using
+        val selectionArgs = arrayOf("%Movies/dashcam_/clip_%") // Or the actual folder path you're using
 
         val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC" // ✅ Removed LIMIT
 
@@ -289,7 +289,7 @@ class CameraViewModel : ViewModel() {
                 videoList.add(Triple(uri, date, name))
             }
         }
-
+        
         if (videoList.size > maxFiles) {
             val toDeleteCount = minOf(10, videoList.size - maxFiles)
             val toDelete = videoList.take(toDeleteCount)

@@ -102,7 +102,7 @@ fun HomePage(
         val cameraProvider = context.getCameraProvider()
         cameraProvider.unbindAll()
         cameraProvider.bindToLifecycle(lifecycleOwner, cameraxSelector, videoCapture)
-//        camVM.startRecordingClips()
+        camVM.startRecordingClips()
     }
 
     val lazyListState = rememberLazyListState()
@@ -124,7 +124,7 @@ fun HomePage(
         if (potholeDetected.value) {
             withContext(Dispatchers.Main) {
                 try {
-//                    camVM.triggerEventRecording()
+                    camVM.triggerEventRecording()
                 } catch (e: Exception) {
                     Log.e("Recording", "Error: ${e.message}", e)
                 }
@@ -200,7 +200,7 @@ fun HomePage(
                 Column {
                     ToggleableFAB(viewModel)
                     FloatingActionButton(
-                        onClick = { camVM.toggleVideoRecording() }, // TODO add functionality trigger
+                        onClick = { camVM.triggerEventRecording() }, // TODO add functionality trigger
                         shape = RoundedCornerShape(50),
                         containerColor = if (camVM.isRecording) Color.Red else Color.Blue,
                         modifier = Modifier
