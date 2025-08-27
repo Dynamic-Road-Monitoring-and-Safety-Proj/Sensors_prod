@@ -4,10 +4,17 @@ import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
 import android.media.MediaMetadataRetriever
+import android.media.MediaMuxer
 import android.net.Uri
+import android.os.Build
 import android.provider.MediaStore
 import android.util.Log
+import androidx.annotation.RequiresApi
+import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.PendingRecording
 import androidx.camera.video.Recorder
@@ -19,17 +26,18 @@ import androidx.core.util.Consumer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
+import java.util.concurrent.Executors
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
-import java.util.TimeZone
-import java.util.concurrent.Executors
 
 class CameraViewModel : ViewModel() {
     var isRecording = false
@@ -42,9 +50,9 @@ class CameraViewModel : ViewModel() {
     private var isTriggerRecordingInProgress = false
 
     // MediaStore paths and ring buffer (RELATIVE_PATH expects a trailing slash)
-    private val CLIPS_RELATIVE_PATH = "Movies/sensors_clips/"
+    // private val CLIPS_RELATIVE_PATH = "Movies/sensors_clips/"
     private val TRIGGERS_RELATIVE_PATH = "Movies/trigger_recordings/"
-    private val FRAMES_RELATIVE_PATH = "Pictures/trigger_frames/"
+    // private val FRAMES_RELATIVE_PATH = "Pictures/trigger_frames/"
     private val RING_CAPACITY = 6
 
     // IST formatter for filenames
@@ -56,7 +64,10 @@ class CameraViewModel : ViewModel() {
         // Hold application context to avoid leaks
         this.context = context.applicationContext
         this.videoCapture = videoCapture
+        ensureClipsDir().mkdirs()
     }
+
+    private fun ensureClipsDir(): File = File(context.externalCacheDir, "video_ring")
 
     private var isClipping = false
     private var clippingJob: Job? = null
@@ -85,27 +96,18 @@ class CameraViewModel : ViewModel() {
     }
 
     private suspend fun recordSegment(durationMs: Long) {
-        // Avoid overlap
         if (isRecording) return
-
         val startSignal = CompletableDeferred<Unit>()
         val finalizeSignal = CompletableDeferred<Unit>()
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                val pending = preparePendingRecording(startSignal, finalizeSignal)
+                val pending = preparePendingRecording()
                 recording = pending.start(executor) { event ->
                     when (event) {
-                        is VideoRecordEvent.Start -> {
-                            isRecording = true
-                            if (!startSignal.isCompleted) startSignal.complete(Unit)
-                        }
+                        is VideoRecordEvent.Start -> { isRecording = true; if (!startSignal.isCompleted) startSignal.complete(Unit) }
                         is VideoRecordEvent.Finalize -> {
-                            if (event.error != VideoRecordEvent.Finalize.ERROR_NONE) {
-                                Log.e("CameraViewModel", "Recording failed: ${event.cause}")
-                            }
-                            advanceRingIndex()
-                            isRecording = false
-                            if (!finalizeSignal.isCompleted) finalizeSignal.complete(Unit)
+                            if (event.error != VideoRecordEvent.Finalize.ERROR_NONE) { Log.e("CameraViewModel", "Recording failed: ${event.cause}") }
+                            advanceRingIndex(); isRecording = false; if (!finalizeSignal.isCompleted) finalizeSignal.complete(Unit)
                         }
                         else -> {}
                     }
@@ -116,235 +118,151 @@ class CameraViewModel : ViewModel() {
                 if (!finalizeSignal.isCompleted) finalizeSignal.completeExceptionally(e)
             }
         }
-
-        // Wait for Start, then hold for duration, then stop and await Finalize
-        startSignal.await()
-        delay(durationMs)
-        stopRecording()
-        finalizeSignal.await()
+        startSignal.await(); delay(durationMs); stopRecording(); finalizeSignal.await()
     }
 
-    private fun preparePendingRecording(
-        startSignal: CompletableDeferred<Unit>,
-        finalizeSignal: CompletableDeferred<Unit>
-    ): PendingRecording {
-        // Determine ring slot and file name and ensure no "(1)" suffixes
+    private fun currentRingFile(): File {
         val ringIndex = getRingIndex()
         val name = String.format(Locale.US, "clip_%02d.mp4", ringIndex)
-        findVideoUriByName(context, name, CLIPS_RELATIVE_PATH)?.let {
-            kotlin.runCatching { context.contentResolver.delete(it, null, null) }
-                .onFailure { e -> Log.e("CameraViewModel", "Failed to delete existing video $name", e) }
-        }
-
-        val contentValues = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, name)
-            put(MediaStore.Video.Media.RELATIVE_PATH, CLIPS_RELATIVE_PATH)
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-        }
-        val mediaStoreOutput = MediaStoreOutputOptions.Builder(
-            context.contentResolver,
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        ).setContentValues(contentValues).build()
-
-        return videoCapture.output.prepareRecording(context, mediaStoreOutput)
-        // .withAudioEnabled() // audio disabled
+        return File(ensureClipsDir(), name)
     }
 
+    private fun preparePendingRecording(): PendingRecording {
+        val outFile = currentRingFile()
+        if (outFile.exists()) outFile.delete()
+        val fileOutput = FileOutputOptions.Builder(outFile).build()
+        return videoCapture.output.prepareRecording(context, fileOutput)
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
     fun triggerEventRecording() {
         if (isTriggerRecordingInProgress) return
-
         isTriggerRecordingInProgress = true
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // Stop current recording to finalize the most recent segment
-                if (isRecording) {
-                    recording?.stop()
-                }
-
-                // Give the system a moment to finalize and index the clip
+                if (isRecording) recording?.stop()
                 delay(600)
-
                 val timestampStr = tsFormatter.format(Date(System.currentTimeMillis()))
+                val segments = latestClipFiles(limit = 5)
+                if (segments.isEmpty()) { Log.w("TriggerSave", "No segments to combine"); return@launch }
 
-                // Copy the latest 5 clips from the clips folder with timestamped names
-                val latestClipUris = queryLatestClipUris(context, CLIPS_RELATIVE_PATH, limit = 5)
-                latestClipUris.forEachIndexed { index, srcUri ->
-                    try {
-                        context.contentResolver.openInputStream(srcUri)?.use { inputStream ->
-                            val triggerFileName = "trigger_clip_${index}_${timestampStr}.mp4"
-
-                            val contentValues = ContentValues().apply {
-                                put(MediaStore.Video.Media.DISPLAY_NAME, triggerFileName)
-                                put(MediaStore.Video.Media.RELATIVE_PATH, TRIGGERS_RELATIVE_PATH)
-                                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                            }
-
-                            val destUri = context.contentResolver.insert(
-                                MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                                contentValues
-                            )
-
-                            if (destUri != null) {
-                                context.contentResolver.openOutputStream(destUri)?.use { outputStream ->
-                                    inputStream.copyTo(outputStream)
-                                }
-                                Log.d("TriggerSave", "Saved trigger clip as: $triggerFileName")
-                            } else {
-                                Log.e("TriggerSave", "Failed to create destination for $triggerFileName")
-                            }
-                        }
-                    } catch (e: Exception) {
-                        Log.e("TriggerSave", "Failed copying clip index=$index", e)
-                    }
+                val triggerName = "trigger_${timestampStr}.mp4"
+                val cv = ContentValues().apply {
+                    put(MediaStore.Video.Media.DISPLAY_NAME, triggerName)
+                    put(MediaStore.Video.Media.RELATIVE_PATH, TRIGGERS_RELATIVE_PATH)
+                    put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
                 }
-
-                // Extract 30 evenly spaced frames across the last ~5 seconds (6 per 1s segment)
-                extractFramesFromClips(latestClipUris, timestampStr)
-
-                // Do NOT start an indefinite recording. If the ring is active, the loop will resume next iteration.
-                // If the ring was not active, we leave capture stopped.
+                val destUri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv)
+                if (destUri != null) {
+                    combineSegmentsToUri(segments, destUri)
+                    Log.d("TriggerSave", "Saved trigger: $triggerName")
+                } else {
+                    Log.e("TriggerSave", "Failed to create trigger in MediaStore")
+                }
             } catch (e: Exception) {
-                Log.e("TriggerSave", "Exception during trigger save: ${e.message}", e)
-            } finally {
-                delay(300)
-                isTriggerRecordingInProgress = false
-            }
+                Log.e("TriggerSave", "Exception: ${e.message}", e)
+            } finally { isTriggerRecordingInProgress = false }
         }
     }
 
-    private fun extractFramesFromClips(urisDesc: List<Uri>, timestampTag: String) {
-        if (urisDesc.isEmpty()) return
-        // urisDesc are newest first; process oldest->newest for order
-        val uris = urisDesc.asReversed()
-        val retriever = MediaMetadataRetriever()
+    private fun latestClipFiles(limit: Int): List<File> {
+        val dir = ensureClipsDir()
+        val files = dir.listFiles { f -> f.isFile && f.name.startsWith("clip_") && f.name.endsWith(".mp4") }?.toList() ?: emptyList()
+        return files.filter { it.exists() && it.length() > 0 }
+            .sortedByDescending { it.lastModified() }
+            .take(limit)
+            .sortedBy { it.lastModified() }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun combineSegmentsToUri(segments: List<File>, destUri: Uri) {
+        val pfd = context.contentResolver.openFileDescriptor(destUri, "rw") ?: return
+        val fd = pfd.fileDescriptor
+        var muxer: MediaMuxer? = null
         try {
-            uris.forEachIndexed { fileIdx, uri ->
-                try {
-                    retriever.setDataSource(context, uri)
-                    val durationMsStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
-                    val durationMs = durationMsStr?.toLongOrNull() ?: 1000L
-                    val framesPerFile = 6 // 6 * 5 files = 30 frames
-                    for (i in 0 until framesPerFile) {
-                        val tUs = ((i + 1) * (durationMs * 1000L) / (framesPerFile + 1)).coerceAtLeast(1L)
-                        val bmp = retriever.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST)
-                        if (bmp != null) {
-                            saveFrameBitmap(bmp, "trigger_frame_${timestampTag}_${fileIdx}_${i}.jpg")
+            muxer = MediaMuxer(fd, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+            var videoTrackIndex = -1
+            var audioTrackIndex = -1
+            var haveAudio = false
+            var timeOffsetUs = 0L
+            segments.forEachIndexed { _, file ->
+                val extractor = MediaExtractor()
+                extractor.setDataSource(file.absolutePath)
+                var inVideoTrack = -1
+                var inAudioTrack = -1
+                for (i in 0 until extractor.trackCount) {
+                    val format = extractor.getTrackFormat(i)
+                    val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                    if (mime.startsWith("video/") && inVideoTrack == -1) {
+                        inVideoTrack = i
+                        if (videoTrackIndex == -1) videoTrackIndex = muxer.addTrack(format)
+                    } else if (mime.startsWith("audio/") && inAudioTrack == -1) {
+                        inAudioTrack = i; haveAudio = true
+                        if (audioTrackIndex == -1) audioTrackIndex = muxer.addTrack(format)
+                    }
+                }
+                if (videoTrackIndex == -1 && inVideoTrack == -1) { extractor.release(); return@forEachIndexed }
+                if (timeOffsetUs == 0L) muxer.start()
+                val buffer = java.nio.ByteBuffer.allocate(1024 * 1024)
+                val info = MediaCodec.BufferInfo()
+                if (inVideoTrack != -1) {
+                    extractor.selectTrack(inVideoTrack)
+                    var eos = false
+                    while (!eos) {
+                        buffer.clear()
+                        val size = extractor.readSampleData(buffer, 0)
+                        if (size < 0) { eos = true } else {
+                            info.size = size; info.offset = 0; info.flags = extractor.sampleFlags
+                            val pts = extractor.sampleTime
+                            info.presentationTimeUs = (if (pts > 0) pts else 0) + timeOffsetUs
+                            muxer.writeSampleData(videoTrackIndex, buffer, info)
+                            extractor.advance()
                         }
                     }
-                } catch (e: Exception) {
-                    Log.e("FrameExtract", "Failed on uri index=$fileIdx", e)
+                    extractor.unselectTrack(inVideoTrack)
                 }
-            }
-        } finally {
-            try { retriever.release() } catch (_: Exception) {}
-        }
-    }
-
-    private fun saveFrameBitmap(bitmap: Bitmap, fileName: String) {
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
-            put(MediaStore.Images.Media.RELATIVE_PATH, FRAMES_RELATIVE_PATH)
-            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-        }
-        val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
-        if (uri == null) {
-            Log.e("FrameSave", "Failed to create image uri for $fileName")
-            bitmap.recycle()
-            return
-        }
-        try {
-            context.contentResolver.openOutputStream(uri)?.use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
-            }
-            Log.d("FrameSave", "Saved frame: $fileName")
-        } catch (e: Exception) {
-            Log.e("FrameSave", "Failed saving $fileName", e)
-        } finally {
-            bitmap.recycle()
-        }
-    }
-
-    // Helper Functions
-
-    private fun startRecording() {
-        // Avoid duplicate starts
-        if (isRecording) return
-
-        viewModelScope.launch(Dispatchers.IO) {
-            try {
-                val result = captureVideo(videoCapture, context)
-                val pendingRecording = result.first
-                val captureListener = result.second
-                recording = pendingRecording.start(executor, captureListener)
-            } catch (e: Exception) {
-                Log.e("CameraViewModel", "Error starting video recording", e)
-                isRecording = false
-            }
-        }
-    }
-
-    private fun stopRecording() {
-        // Stop will trigger Finalize; don't flip isRecording here
-        recording?.stop()
-        recording = null
-    }
-
-    private fun captureVideo(
-        videoCapture: VideoCapture<Recorder>,
-        context: Context
-    ): Pair<PendingRecording, Consumer<VideoRecordEvent>> {
-
-        // Determine ring slot and file name
-        val ringIndex = getRingIndex()
-        val name = String.format(Locale.US, "clip_%02d.mp4", ringIndex)
-
-        // Ensure previous file with the same name in our folder is removed to prevent  (1).mp4 suffixes
-        findVideoUriByName(context, name, CLIPS_RELATIVE_PATH)?.let {
-            kotlin.runCatching {
-                context.contentResolver.delete(it, null, null)
-                Log.d("CameraViewModel", "Deleted existing video: $name")
-            }.onFailure { e ->
-                Log.e("CameraViewModel", "Failed to delete existing video $name", e)
-            }
-        }
-
-        val contentValues = ContentValues().apply {
-            put(MediaStore.Video.Media.DISPLAY_NAME, name)
-            put(MediaStore.Video.Media.RELATIVE_PATH, CLIPS_RELATIVE_PATH)
-            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-        }
-
-        val mediaStoreOutput = MediaStoreOutputOptions.Builder(
-            context.contentResolver,
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        ).setContentValues(contentValues).build()
-
-        val captureListener = Consumer<VideoRecordEvent> { event ->
-            when (event) {
-                is VideoRecordEvent.Start -> {
-                    isRecording = true
-                }
-                is VideoRecordEvent.Finalize -> {
-                    if (event.error != VideoRecordEvent.Finalize.ERROR_NONE) {
-                        Log.e("CameraViewModel", "Recording failed: ${event.cause}")
+                if (haveAudio && inAudioTrack != -1) {
+                    extractor.selectTrack(inAudioTrack)
+                    var eos = false
+                    while (!eos) {
+                        buffer.clear()
+                        val size = extractor.readSampleData(buffer, 0)
+                        if (size < 0) { eos = true } else {
+                            info.size = size; info.offset = 0; info.flags = extractor.sampleFlags
+                            val pts = extractor.sampleTime
+                            info.presentationTimeUs = (if (pts > 0) pts else 0) + timeOffsetUs
+                            muxer.writeSampleData(audioTrackIndex, buffer, info)
+                            extractor.advance()
+                        }
                     }
-                    // Advance ring index on finalize so next clip uses the next slot
-                    advanceRingIndex()
-                    isRecording = false
+                    extractor.unselectTrack(inAudioTrack)
                 }
-                else -> { /* no-op */ }
+                timeOffsetUs += estimateDurationUs(file)
+                extractor.release()
             }
-        }
-
-        val recording = videoCapture.output
-            .prepareRecording(context, mediaStoreOutput)
-            // Audio disabled to save power and avoid permission requirement
-            //.withAudioEnabled()
-
-        return Pair(recording, captureListener)
+        } catch (e: Exception) { Log.e("Muxer", "combine error", e) }
+        finally { try { muxer?.stop(); muxer?.release() } catch (_: Exception) {}; try { pfd.close() } catch (_: Exception) {} }
     }
 
-    // Ring index stored in SharedPreferences
+    private fun estimateDurationUs(file: File): Long {
+        return try {
+            val mmr = android.media.MediaMetadataRetriever()
+            mmr.setDataSource(file.absolutePath)
+            val dMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 1000L
+            mmr.release(); dMs * 1000L
+        } catch (e: Exception) { 1_000_000L }
+    }
+
+    // Remove frame extraction, image saving, and MediaStore-based ring helpers
+    // private fun extractFramesFromClips(...) { }
+    // private fun saveFrameBitmap(...) { }
+    // private fun queryLatestClipUris(...) { }
+    // private fun findVideoUriByName(...) { }
+    // private fun captureVideo(...) { }
+    // private fun startRecording() { }
+
+    private fun stopRecording() { recording?.stop(); recording = null }
+
     private fun getRingIndex(): Int {
         val prefs = context.getSharedPreferences("camera_prefs", Context.MODE_PRIVATE)
         return prefs.getInt("clip_index", 0).coerceIn(0, RING_CAPACITY - 1)
@@ -354,52 +272,6 @@ class CameraViewModel : ViewModel() {
         val prefs = context.getSharedPreferences("camera_prefs", Context.MODE_PRIVATE)
         val next = (getRingIndex() + 1) % RING_CAPACITY
         prefs.edit { putInt("clip_index", next) }
-    }
-
-    private fun queryLatestClipUris(context: Context, relativePath: String, limit: Int): List<Uri> {
-        val result = mutableListOf<Uri>()
-        val projection = arrayOf(
-            MediaStore.Video.Media._ID,
-            MediaStore.Video.Media.DATE_ADDED,
-            MediaStore.Video.Media.DISPLAY_NAME,
-            MediaStore.Video.Media.RELATIVE_PATH
-        )
-        val selection = "${MediaStore.Video.Media.RELATIVE_PATH} = ?"
-        val selectionArgs = arrayOf(relativePath)
-        val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC"
-
-        context.contentResolver.query(
-            MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-            projection,
-            selection,
-            selectionArgs,
-            sortOrder
-        )?.use { cursor ->
-            val idCol = cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-            var count = 0
-            while (cursor.moveToNext() && count < limit) {
-                val id = cursor.getLong(idCol)
-                val uri = Uri.withAppendedPath(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, id.toString())
-                result.add(uri)
-                count++
-            }
-        }
-        return result
-    }
-
-    private fun findVideoUriByName(context: Context, fileName: String, relativePath: String): Uri? {
-        val projection = arrayOf(MediaStore.Video.Media._ID)
-        val selection = "${MediaStore.Video.Media.DISPLAY_NAME} = ? AND ${MediaStore.Video.Media.RELATIVE_PATH} = ?"
-        val selectionArgs = arrayOf(fileName, relativePath)
-        val queryUri = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-
-        context.contentResolver.query(queryUri, projection, selection, selectionArgs, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.Video.Media._ID))
-                return Uri.withAppendedPath(queryUri, id.toString())
-            }
-        }
-        return null
     }
 
     override fun onCleared() {
