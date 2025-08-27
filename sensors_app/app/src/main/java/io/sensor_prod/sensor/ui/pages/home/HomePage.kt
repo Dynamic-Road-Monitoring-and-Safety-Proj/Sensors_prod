@@ -223,7 +223,6 @@ fun HomePage(
                 }
             }
         },
-        contentWindowInsets = WindowInsets(0)
     ) {
 
         LazyColumn(

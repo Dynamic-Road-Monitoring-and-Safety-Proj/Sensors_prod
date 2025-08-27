@@ -13,6 +13,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.RequiresApi
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -48,6 +49,14 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             SensifyM3Theme {
+                // Match system bar icon contrast to theme
+                val darkTheme = isSystemInDarkTheme()
+                SideEffect {
+                    val controller = WindowCompat.getInsetsController(window, window.decorView)
+                    controller.isAppearanceLightStatusBars = !darkTheme
+                    controller.isAppearanceLightNavigationBars = !darkTheme
+                }
+
                 Surface(
                     modifier = Modifier
                         .fillMaxSize()
