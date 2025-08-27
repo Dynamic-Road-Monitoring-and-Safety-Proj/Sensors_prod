@@ -77,7 +77,6 @@ interface PermissionsRequest {
                 Manifest.permission.CAMERA,
                 Manifest.permission.MANAGE_MEDIA,
                 Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.RECORD_AUDIO,
                 Manifest.permission.BLUETOOTH_SCAN,
                 Manifest.permission.BLUETOOTH_CONNECT,
                 Manifest.permission.HIGH_SAMPLING_RATE_SENSORS,

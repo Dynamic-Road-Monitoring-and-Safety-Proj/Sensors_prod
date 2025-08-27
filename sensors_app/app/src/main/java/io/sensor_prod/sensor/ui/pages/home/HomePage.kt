@@ -1,10 +1,8 @@
 package io.sensor_prod.sensor.ui.pages.home
 
-import android.Manifest
 import android.content.Context
 import android.util.Log
 import android.widget.Toast
-import androidx.annotation.RequiresPermission
 import androidx.camera.core.CameraSelector
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.video.Quality
@@ -15,9 +13,6 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -45,32 +40,26 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
 import com.google.accompanist.pager.ExperimentalPagerApi
-import com.google.accompanist.pager.rememberPagerState
 import io.sensify.sensor.R
-import io.sensor_prod.sensor.ui.composables.isScrollingUp
 import io.sensor_prod.sensor.ui.navigation.NavDirectionsApp
 import io.sensor_prod.sensor.ui.pages.home.items.HomeSensorItem
 import io.sensor_prod.sensor.ui.resource.values.JlResDimens
 import io.sensor_prod.sensor.ui.resource.values.JlResShapes
 import io.sensor_prod.sensor.ui.resource.values.JlResTxtStyles
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import kotlin.coroutines.resume
 import kotlin.coroutines.suspendCoroutine
 
-@RequiresPermission(Manifest.permission.RECORD_AUDIO)
 @OptIn(
     ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class, ExperimentalTextApi::class,
     ExperimentalPagerApi::class, ExperimentalAnimationApi::class
 )
-@Preview(showBackground = true, backgroundColor = 0xFF041B11)
 @Composable
 fun HomePage(
     modifier: Modifier = Modifier, navController: NavController? = null,
@@ -92,12 +81,12 @@ fun HomePage(
     LaunchedEffect(Unit) {
         val recorder = Recorder.Builder()
             .setQualitySelector(QualitySelector.fromOrderedList(
-                listOf(Quality.FHD, Quality.HD, Quality.HIGHEST)
+                listOf(Quality.HD, Quality.FHD) // prefer HD to save power
             ))
             .build()
         val videoCapture = VideoCapture.withOutput(recorder)
 
-        // Initialize the ViewModel
+        // Initialize the ViewModel with application context inside VM
         camVM.initialize(context, videoCapture)
         val cameraProvider = context.getCameraProvider()
         cameraProvider.unbindAll()
@@ -106,13 +95,9 @@ fun HomePage(
     }
 
     val lazyListState = rememberLazyListState()
-//    val sensorsProvider = SensorsProviderComposable()
-//    val sensors = remember { sensorsProvider }
 
-    val sensorUiState = viewModel.mUiState.collectAsState()
     val potholeDetected = viewModel.potholeDetected.collectAsState()
     Log.d("HomePage", "potholeDetected ${potholeDetected.value}")
-//    var sensorUiState = viewModel.mUiCurrentSensorState.collectAsState()
 
     val isAtTop = remember {
         derivedStateOf {
@@ -139,19 +124,14 @@ fun HomePage(
         }
     }
 
-
-
-//    Log.d("HomePage", "sensor ${sensorsUiState.value.sensors}");
-
     Scaffold(topBar = {
 
         SmallTopAppBar(
 
-//            backgroundColor = Color.Transparent,
             colors = if (!isAtTop.value) TopAppBarDefaults.mediumTopAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), //Add your own color here, just to clarify.
+                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
             ) else TopAppBarDefaults.mediumTopAppBarColors(
-                containerColor = Color.Transparent //Add your own color here, just to clarify.
+                containerColor = Color.Transparent
             ),
 
             navigationIcon = {
@@ -194,13 +174,13 @@ fun HomePage(
     },
         floatingActionButton = {
             Column(
-                verticalArrangement = Arrangement.spacedBy(16.dp), // <-- Adds space between FABs
+                verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier.padding(bottom = 16.dp)
             ) {
                 Column {
                     ToggleableFAB(viewModel)
                     FloatingActionButton(
-                        onClick = { camVM.triggerEventRecording() }, // TODO add functionality trigger
+                        onClick = { camVM.triggerEventRecording() },
                         shape = RoundedCornerShape(50),
                         containerColor = if (camVM.isRecording) Color.Red else Color.Blue,
                         modifier = Modifier
@@ -257,9 +237,6 @@ fun HomePage(
                         )
                     )
                 ),
-//                .fillMaxSize()
-//                .background(JLThemeBase.colorPrimary10)
-//                .consumedWindowInsets ,
             contentPadding = it,
             state = lazyListState
         ) {
@@ -268,43 +245,6 @@ fun HomePage(
                 Spacer(modifier = JlResShapes.Space.H24)
 
             }
-            // Header  GRAPH ON HOME REMOVED FOR SPEED
-//            item {
-//                Box(
-//                    modifier = Modifier.padding(
-//                        start = JlResDimens.dp32,
-//                        end = JlResDimens.dp32
-//                    ),
-//                ) {
-//                    HomeHeader(
-//                        sensorUiState.value.currentSensor,
-//                        totalActive = sensorUiState.value.activeSensorCounts,
-//                        onClickArrow = { isLeft ->
-//
-//
-//                            var currentPage = pagerState.currentPage
-//                            var totalPage = pagerState.pageCount
-//
-//                            if (!isLeft && currentPage + 1 < totalPage) {
-//                                coroutineScope.launch {
-//                                    pagerState.animateScrollToPage(currentPage + 1)
-//                                }
-//                            } else if (isLeft && currentPage > 0 && totalPage > 0) {
-//                                coroutineScope.launch {
-//                                    pagerState.animateScrollToPage(currentPage - 1)
-//                                }
-//                            }
-//                        }
-//                    )
-//                }
-//            }
-//            // Plotting area
-//            item {
-////                Spacer(modifier = Modifier.height(JlResDimens.dp350))
-//
-//                HomeSensorGraphPager(viewModel = viewModel, pagerState = pagerState)
-//
-//            }
 
             // Available Sensors
             item {
@@ -343,24 +283,9 @@ fun HomePage(
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
-//                                    .fillParentMaxWidth(0.5f)
-//                                    .padding(bottom = JlResDimens.dp8)
-                                /*.clickable(
-                                    enabled = true,
-                                    onClickLabel = "Card Click",
-                                    onClick = {
-                                        navController?.navigate(NavDirectionsLabs.DetailPage.route)
-                                    }
-                                )*/
-
                             ) {
                                 HomeSensorItem(
                                     modelSensor = item[i],
-                                    /* se = item[i].sensorName,
-                                     sensorValue = item[i].sensorValue,
-                                     sensorUnit = item[i].sensorUnit,
-                                     sensorIcon = item[i].sensorIcon*/
-
                                     onCheckChange = { type: Int, isChecked: Boolean ->
                                         viewModel.onSensorChecked(type, isChecked)
                                     },
@@ -418,10 +343,6 @@ fun HomePage(
     }
 }
 
-@Composable
-fun Factory() {
-    TODO("Not yet implemented")
-}
 @Composable
 fun ToggleableFAB(viewModel: HomeViewModel) {
     var isLogging by remember { mutableStateOf(false) }
