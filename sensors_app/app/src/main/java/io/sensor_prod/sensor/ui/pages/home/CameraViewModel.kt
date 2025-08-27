@@ -19,6 +19,7 @@ import androidx.core.util.Consumer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -67,23 +68,86 @@ class CameraViewModel : ViewModel() {
             clippingJob?.cancel()
             stopRecording()
         } else {
-            // Start clipping (loop, one 1s segment at a time; wait for finalize before next)
+            // Start clipping using precise 1s segments: wait for Start -> delay -> Stop -> wait Finalize
             isClipping = true
             clippingJob = viewModelScope.launch {
                 while (isActive && isClipping) {
-                    startRecording()
-                    // Target ~1s segments
-                    delay(1000)
-                    stopRecording()
-                    // Wait until finalize callback flips the flag
-                    var waited = 0
-                    while (isRecording && waited < 2000 && isActive && isClipping) {
-                        delay(50)
-                        waited += 50
+                    try {
+                        recordSegment(durationMs = 1000L)
+                    } catch (e: Exception) {
+                        Log.e("CameraViewModel", "Segment error", e)
+                        // Small backoff to avoid tight loop on repeated errors
+                        delay(100)
                     }
                 }
             }
         }
+    }
+
+    private suspend fun recordSegment(durationMs: Long) {
+        // Avoid overlap
+        if (isRecording) return
+
+        val startSignal = CompletableDeferred<Unit>()
+        val finalizeSignal = CompletableDeferred<Unit>()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val pending = preparePendingRecording(startSignal, finalizeSignal)
+                recording = pending.start(executor) { event ->
+                    when (event) {
+                        is VideoRecordEvent.Start -> {
+                            isRecording = true
+                            if (!startSignal.isCompleted) startSignal.complete(Unit)
+                        }
+                        is VideoRecordEvent.Finalize -> {
+                            if (event.error != VideoRecordEvent.Finalize.ERROR_NONE) {
+                                Log.e("CameraViewModel", "Recording failed: ${event.cause}")
+                            }
+                            advanceRingIndex()
+                            isRecording = false
+                            if (!finalizeSignal.isCompleted) finalizeSignal.complete(Unit)
+                        }
+                        else -> {}
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("CameraViewModel", "Error preparing recording", e)
+                if (!startSignal.isCompleted) startSignal.completeExceptionally(e)
+                if (!finalizeSignal.isCompleted) finalizeSignal.completeExceptionally(e)
+            }
+        }
+
+        // Wait for Start, then hold for duration, then stop and await Finalize
+        startSignal.await()
+        delay(durationMs)
+        stopRecording()
+        finalizeSignal.await()
+    }
+
+    private fun preparePendingRecording(
+        startSignal: CompletableDeferred<Unit>,
+        finalizeSignal: CompletableDeferred<Unit>
+    ): PendingRecording {
+        // Determine ring slot and file name and ensure no "(1)" suffixes
+        val ringIndex = getRingIndex()
+        val name = String.format(Locale.US, "clip_%02d.mp4", ringIndex)
+        findVideoUriByName(context, name, CLIPS_RELATIVE_PATH)?.let {
+            kotlin.runCatching { context.contentResolver.delete(it, null, null) }
+                .onFailure { e -> Log.e("CameraViewModel", "Failed to delete existing video $name", e) }
+        }
+
+        val contentValues = ContentValues().apply {
+            put(MediaStore.Video.Media.DISPLAY_NAME, name)
+            put(MediaStore.Video.Media.RELATIVE_PATH, CLIPS_RELATIVE_PATH)
+            put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+        }
+        val mediaStoreOutput = MediaStoreOutputOptions.Builder(
+            context.contentResolver,
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        ).setContentValues(contentValues).build()
+
+        return videoCapture.output.prepareRecording(context, mediaStoreOutput)
+        // .withAudioEnabled() // audio disabled
     }
 
     fun triggerEventRecording() {
@@ -137,10 +201,8 @@ class CameraViewModel : ViewModel() {
                 // Extract 30 evenly spaced frames across the last ~5 seconds (6 per 1s segment)
                 extractFramesFromClips(latestClipUris, timestampStr)
 
-                // Optionally resume recording if clipping was not enabled
-                if (!isRecording && !isClipping) {
-                    startRecording()
-                }
+                // Do NOT start an indefinite recording. If the ring is active, the loop will resume next iteration.
+                // If the ring was not active, we leave capture stopped.
             } catch (e: Exception) {
                 Log.e("TriggerSave", "Exception during trigger save: ${e.message}", e)
             } finally {
