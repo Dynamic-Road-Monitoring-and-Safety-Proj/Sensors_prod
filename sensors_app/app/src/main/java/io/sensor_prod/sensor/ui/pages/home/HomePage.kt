@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.painterResource
@@ -41,6 +42,7 @@ import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -124,58 +126,58 @@ fun HomePage(
         }
     }
 
-    Scaffold(topBar = {
-
-        SmallTopAppBar(
-
-            colors = if (!isAtTop.value) TopAppBarDefaults.mediumTopAppBarColors(
-                containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
-            ) else TopAppBarDefaults.mediumTopAppBarColors(
-                containerColor = Color.Transparent
-            ),
-
-            navigationIcon = {
-                Box(Modifier.padding(horizontal = JlResDimens.dp20)) {
-                    Image(
-                        painterResource(id = R.drawable.pic_sensify_logo),
-                        modifier = Modifier
-                            .width(JlResDimens.dp32)
-                            .height(JlResDimens.dp36),
-                        contentDescription = null,
-                        contentScale = ContentScale.FillBounds
+    // Use safeDrawing insets to avoid status bar/notch overlap
+    Scaffold(
+        topBar = {
+            SmallTopAppBar(
+                colors = if (!isAtTop.value) TopAppBarDefaults.mediumTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+                ) else TopAppBarDefaults.mediumTopAppBarColors(
+                    containerColor = Color.Transparent
+                ),
+                navigationIcon = {
+                    Box(Modifier.padding(horizontal = JlResDimens.dp20)) {
+                        Image(
+                            painterResource(id = R.drawable.pic_sensify_logo),
+                            modifier = Modifier
+                                .width(JlResDimens.dp32)
+                                .height(JlResDimens.dp36),
+                            contentDescription = null,
+                            contentScale = ContentScale.FillBounds
+                        )
+                    }
+                },
+                title = {
+                    Text(
+                        text = "ILGC",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Center,
+                        style = JlResTxtStyles.h4,
+                        fontWeight = FontWeight(400),
+                        modifier = modifier.fillMaxWidth(),
                     )
-                }
-            },
-            title = {
-                Text(
-                    text = "ILGC",
-                    color = MaterialTheme.colorScheme.onSurface,
-                    textAlign = TextAlign.Center,
-                    style = JlResTxtStyles.h4,
-                    fontWeight = FontWeight(400),
-                    modifier = modifier.fillMaxWidth(),
-                )
-            },
-            actions = {
-                Box(Modifier.padding(horizontal = JlResDimens.dp20)) {
-                    Image(
-
-                        painterResource(id = R.drawable.pic_sensify_logo),
-                        modifier = Modifier
-                            .alpha(0f)
-                            .width(JlResDimens.dp32)
-                            .height(JlResDimens.dp36),
-                        contentDescription = null,
-                        contentScale = ContentScale.FillBounds
-                    )
-                }
-            },
+                },
+                actions = {
+                    Box(Modifier.padding(horizontal = JlResDimens.dp20)) {
+                        Image(
+                            painterResource(id = R.drawable.pic_sensify_logo),
+                            modifier = Modifier
+                                .alpha(0f)
+                                .width(JlResDimens.dp32)
+                                .height(JlResDimens.dp36),
+                            contentDescription = null,
+                            contentScale = ContentScale.FillBounds
+                        )
+                    }
+                },
             )
-    },
+        },
         floatingActionButton = {
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
-                modifier = Modifier.padding(bottom = 16.dp)
+                modifier = Modifier
+                    .windowInsetsPadding(WindowInsets.navigationBars)
+                    .padding(bottom = 16.dp)
             ) {
                 Column {
                     ToggleableFAB(viewModel)
@@ -221,7 +223,7 @@ fun HomePage(
                     }
                 }
             }
-        }
+        },
     ) {
 
         LazyColumn(
@@ -232,7 +234,6 @@ fun HomePage(
                     Brush.verticalGradient(
                         colors = listOf(
                             MaterialTheme.colorScheme.onSurface.copy(alpha = 0.05f),
-
                             MaterialTheme.colorScheme.onSurface.copy(alpha = 0.02f),
                         )
                     )
@@ -315,29 +316,38 @@ fun HomePage(
             item { Spacer(modifier = Modifier.height(JlResDimens.dp16)) }
         }
     }
+
+    // Responsive pothole banner that respects status bar/notch and screen width
+    val screenWidthDp = LocalConfiguration.current.screenWidthDp
+    val bannerFontSize = if (screenWidthDp < 360) 12.sp else 14.sp
     AnimatedVisibility(
         visible = potholeDetected.value,
-        enter = expandVertically(animationSpec = tween(durationMillis = 900)), // 1 second
-        exit = shrinkVertically(animationSpec = tween(durationMillis = 900)), // 1 second
+        enter = expandVertically(animationSpec = tween(durationMillis = 900)),
+        exit = shrinkVertically(animationSpec = tween(durationMillis = 900)),
         modifier = Modifier
             .fillMaxWidth()
-            .padding(start= 290.dp, top = 12.dp)
+            .windowInsetsPadding(WindowInsets.statusBars)
+            .padding(horizontal = 16.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier
+                .fillMaxWidth()
                 .background(Color.Red.copy(alpha = 0.7f), shape = RoundedCornerShape(8.dp))
-                .padding(6.dp)
+                .padding(8.dp)
         ) {
-            Icon(Icons.Default.Warning, contentDescription = "Warning", tint = Color.White,
-                modifier = Modifier.size(24.dp)
+            Icon(
+                Icons.Default.Warning,
+                contentDescription = "Warning",
+                tint = Color.White,
+                modifier = Modifier.size(if (screenWidthDp < 360) 18.dp else 24.dp)
             )
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 text = "Pothole detected!",
                 color = Color.White,
-                style = JlResTxtStyles.p3
+                style = JlResTxtStyles.p3.copy(fontSize = bannerFontSize)
             )
         }
     }
