@@ -3,6 +3,8 @@ package io.sensor_prod.sensor.ui.pages.home
 import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
 import android.util.Log
@@ -22,7 +24,10 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 import java.util.concurrent.Executors
 
 class CameraViewModel : ViewModel() {
@@ -38,7 +43,12 @@ class CameraViewModel : ViewModel() {
     // MediaStore paths and ring buffer (RELATIVE_PATH expects a trailing slash)
     private val CLIPS_RELATIVE_PATH = "Movies/sensors_clips/"
     private val TRIGGERS_RELATIVE_PATH = "Movies/trigger_recordings/"
+    private val FRAMES_RELATIVE_PATH = "Pictures/trigger_frames/"
     private val RING_CAPACITY = 6
+
+    // IST formatter for filenames
+    private val tzIST: TimeZone = TimeZone.getTimeZone("Asia/Kolkata")
+    private val tsFormatter = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss.SSS", Locale.US).apply { timeZone = tzIST }
 
     // Utility functions
     fun initialize(context: Context, videoCapture: VideoCapture<Recorder>) {
@@ -57,17 +67,17 @@ class CameraViewModel : ViewModel() {
             clippingJob?.cancel()
             stopRecording()
         } else {
-            // Start clipping (loop, one segment at a time; wait for finalize before next)
+            // Start clipping (loop, one 1s segment at a time; wait for finalize before next)
             isClipping = true
             clippingJob = viewModelScope.launch {
                 while (isActive && isClipping) {
                     startRecording()
-                    // Target ~5s segments
-                    delay(5000)
+                    // Target ~1s segments
+                    delay(1000)
                     stopRecording()
                     // Wait until finalize callback flips the flag
                     var waited = 0
-                    while (isRecording && waited < 4000 && isActive && isClipping) {
+                    while (isRecording && waited < 2000 && isActive && isClipping) {
                         delay(50)
                         waited += 50
                     }
@@ -88,24 +98,16 @@ class CameraViewModel : ViewModel() {
                 }
 
                 // Give the system a moment to finalize and index the clip
-                delay(800)
+                delay(600)
 
-                // Ensure trigger folder is accessible (optional preflight)
-                context.contentResolver.query(
-                    MediaStore.Video.Media.EXTERNAL_CONTENT_URI,
-                    arrayOf(MediaStore.Video.Media._ID),
-                    "${MediaStore.Video.Media.RELATIVE_PATH} = ?",
-                    arrayOf(TRIGGERS_RELATIVE_PATH),
-                    null
-                )?.close()
+                val timestampStr = tsFormatter.format(Date(System.currentTimeMillis()))
 
-                // Copy the latest 2 clips from the clips folder
-                val latestClipUris = queryLatestClipUris(context, CLIPS_RELATIVE_PATH, limit = 2)
+                // Copy the latest 5 clips from the clips folder with timestamped names
+                val latestClipUris = queryLatestClipUris(context, CLIPS_RELATIVE_PATH, limit = 5)
                 latestClipUris.forEachIndexed { index, srcUri ->
                     try {
                         context.contentResolver.openInputStream(srcUri)?.use { inputStream ->
-                            val timestamp = System.currentTimeMillis()
-                            val triggerFileName = "trigger_clip_${index}_$timestamp.mp4"
+                            val triggerFileName = "trigger_clip_${index}_${timestampStr}.mp4"
 
                             val contentValues = ContentValues().apply {
                                 put(MediaStore.Video.Media.DISPLAY_NAME, triggerFileName)
@@ -132,6 +134,9 @@ class CameraViewModel : ViewModel() {
                     }
                 }
 
+                // Extract 30 evenly spaced frames across the last ~5 seconds (6 per 1s segment)
+                extractFramesFromClips(latestClipUris, timestampStr)
+
                 // Optionally resume recording if clipping was not enabled
                 if (!isRecording && !isClipping) {
                     startRecording()
@@ -139,12 +144,63 @@ class CameraViewModel : ViewModel() {
             } catch (e: Exception) {
                 Log.e("TriggerSave", "Exception during trigger save: ${e.message}", e)
             } finally {
-                delay(500)
+                delay(300)
                 isTriggerRecordingInProgress = false
             }
         }
     }
 
+    private fun extractFramesFromClips(urisDesc: List<Uri>, timestampTag: String) {
+        if (urisDesc.isEmpty()) return
+        // urisDesc are newest first; process oldest->newest for order
+        val uris = urisDesc.asReversed()
+        val retriever = MediaMetadataRetriever()
+        try {
+            uris.forEachIndexed { fileIdx, uri ->
+                try {
+                    retriever.setDataSource(context, uri)
+                    val durationMsStr = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)
+                    val durationMs = durationMsStr?.toLongOrNull() ?: 1000L
+                    val framesPerFile = 6 // 6 * 5 files = 30 frames
+                    for (i in 0 until framesPerFile) {
+                        val tUs = ((i + 1) * (durationMs * 1000L) / (framesPerFile + 1)).coerceAtLeast(1L)
+                        val bmp = retriever.getFrameAtTime(tUs, MediaMetadataRetriever.OPTION_CLOSEST)
+                        if (bmp != null) {
+                            saveFrameBitmap(bmp, "trigger_frame_${timestampTag}_${fileIdx}_${i}.jpg")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e("FrameExtract", "Failed on uri index=$fileIdx", e)
+                }
+            }
+        } finally {
+            try { retriever.release() } catch (_: Exception) {}
+        }
+    }
+
+    private fun saveFrameBitmap(bitmap: Bitmap, fileName: String) {
+        val values = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, fileName)
+            put(MediaStore.Images.Media.RELATIVE_PATH, FRAMES_RELATIVE_PATH)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+        }
+        val uri = context.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+        if (uri == null) {
+            Log.e("FrameSave", "Failed to create image uri for $fileName")
+            bitmap.recycle()
+            return
+        }
+        try {
+            context.contentResolver.openOutputStream(uri)?.use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+            }
+            Log.d("FrameSave", "Saved frame: $fileName")
+        } catch (e: Exception) {
+            Log.e("FrameSave", "Failed saving $fileName", e)
+        } finally {
+            bitmap.recycle()
+        }
+    }
 
     // Helper Functions
 
