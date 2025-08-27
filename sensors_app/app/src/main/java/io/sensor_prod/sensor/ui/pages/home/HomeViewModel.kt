@@ -37,6 +37,10 @@ import java.nio.channels.FileChannel
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sqrt
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 
 
 class HomeViewModel : ViewModel() {
@@ -260,68 +264,86 @@ class HomeViewModel : ViewModel() {
     private var csvFile: File? = null
     private var writer: BufferedWriter? = null
     private var isLogging = MutableStateFlow(false)
-    private fun startCsvLogging() {
-        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
-        if (!dir.exists()) dir.mkdirs() // Ensure directory exists
+    private var currentDateString: String? = null
+    private val tzIST: TimeZone = TimeZone.getTimeZone("Asia/Kolkata")
+    private val dateFormatterIST = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = tzIST }
+    private val timeFormatterIST = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).apply { timeZone = tzIST }
 
-        csvFile = File(dir, "sensor_data.csv")
-        val isNewFile = !csvFile!!.exists()
+    private fun baseCsvDir(): File {
+        val docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
+        val folder = File(docs, "SensifyCSV")
+        if (!folder.exists()) folder.mkdirs()
+        return folder
+    }
 
-        writer = BufferedWriter(FileWriter(csvFile, true)) // Append mode
-        if (isNewFile) {
-            val header = StringBuilder("Date,Timestamp,SensorType")
+    private fun fileForDate(dateStr: String): File = File(baseCsvDir(), "sensor_data_${dateStr}.csv")
 
+    private fun openWriterForDate(dateStr: String) {
+        val file = fileForDate(dateStr)
+        val isNew = !file.exists()
+        writer = BufferedWriter(FileWriter(file, true))
+        csvFile = file
+        if (isNew) {
+            val header = StringBuilder("Time,SensorType")
             var maxAxisCount = 3
             for (i in 0 until SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.size) {
                 val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.valueAt(i)
-                if (axisCount > maxAxisCount) {
-                    maxAxisCount = axisCount
-                }
+                if (axisCount > maxAxisCount) maxAxisCount = axisCount
             }
-            for (i in 0 until maxAxisCount) {
-                header.append(",Value${i+1}")
-            }
+            for (i in 0 until maxAxisCount) header.append(",Value${i + 1}")
             header.append("\n")
             writer?.write(header.toString())
         }
+        Log.d("CSV", "Logging to: ${file.absolutePath}")
+    }
 
+    private fun rotateIfNeeded(nowMs: Long) {
+        val today = dateFormatterIST.format(Date(nowMs))
+        if (currentDateString == null || currentDateString != today || writer == null) {
+            // Close old
+            try { writer?.flush(); writer?.close() } catch (_: Exception) {}
+            // Open new
+            currentDateString = today
+            openWriterForDate(today)
+        }
+    }
+
+    private fun startCsvLogging() {
+        // Initialize for today
+        val now = System.currentTimeMillis()
+        rotateIfNeeded(now)
         isLogging.value = true
-        Log.d("CSV", "Logging Started: ${csvFile?.absolutePath}")
     }
 
     private fun stopCsvLogging() {
         isLogging.value = false
-        writer?.flush()
-        writer?.close()
+        try { writer?.flush(); writer?.close() } catch (_: Exception) {}
+        writer = null
+        csvFile = null
         Log.d("CSV", "Logging Stopped")
     }
-    @SuppressLint("DefaultLocale")
+
     private fun logSensorData(sensorType: Int, values: FloatArray?) {
         if (isLogging.value && values != null) {
-            val timestamp = System.currentTimeMillis()
+            val now = System.currentTimeMillis()
+            rotateIfNeeded(now)
+
+            // Only time is logged; date is already in the file name
+            val timeStr = timeFormatterIST.format(Date(now))
             val sensorName = SensorsConstants.MAP_TYPE_TO_NAME[sensorType] ?: "Unknown"
-            val valuesString = values.joinToString(",") { String.format("%.6f", it) }
             val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT[sensorType]
 
-            val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd,HH:mm:ss.SSS", java.util.Locale.getDefault())
-            val formattedDate = dateFormat.format(java.util.Date(timestamp))
-
             val csvLine = StringBuilder()
-            csvLine.append("$formattedDate,$sensorName")
-
+            csvLine.append("$timeStr,$sensorName")
             for (i in 0 until axisCount) {
-                csvLine.append(",${if (i < values.size) values[i] else ""}")
+                val v = if (i < values.size) String.format(Locale.US, "%.6f", values[i]) else ""
+                csvLine.append(",").append(v)
             }
-
             csvLine.append("\n")
 
             writer?.write(csvLine.toString())
-            writer?.flush()
-
-            Log.d("CSV", "Logging: $csvLine")
         }
     }
-
 
     fun toggleCsvLogging() {
         if (isLogging.value) stopCsvLogging() else startCsvLogging()

@@ -13,10 +13,12 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.RequiresApi
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import io.sensor_prod.sensor.domains.permissions.PermissionsRequest
 import io.sensor_prod.sensor.domains.permissions.RememberPermissionManager
@@ -42,10 +44,23 @@ class MainActivity : ComponentActivity() {
             SensorPacketsProvider.getInstance().setSensorManager(sensorManager)
         }
 
+        // Enable edge-to-edge; we'll pad content with safeDrawing insets in Compose
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         setContent {
             SensifyM3Theme {
+                // Match system bar icon contrast to theme
+                val darkTheme = isSystemInDarkTheme()
+                SideEffect {
+                    val controller = WindowCompat.getInsetsController(window, window.decorView)
+                    controller.isAppearanceLightStatusBars = !darkTheme
+                    controller.isAppearanceLightNavigationBars = !darkTheme
+                }
+
                 Surface(
-                    modifier = Modifier.fillMaxSize(),
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .windowInsetsPadding(WindowInsets.safeDrawing),
                     color = MaterialTheme.colorScheme.background
                 ) {
                     var hasPermissions by remember { mutableStateOf(false) }
@@ -63,7 +78,7 @@ class MainActivity : ComponentActivity() {
                             requestStoragePermission()
                         }
                     }
-                        NavGraphApp()
+                    NavGraphApp()
                 }
             }
         }
