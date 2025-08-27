@@ -176,7 +176,6 @@ fun HomePage(
             Column(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 modifier = Modifier
-                    .windowInsetsPadding(WindowInsets.navigationBars)
                     .padding(bottom = 16.dp)
             ) {
                 Column {
@@ -224,6 +223,7 @@ fun HomePage(
                 }
             }
         },
+        contentWindowInsets = WindowInsets(0)
     ) {
 
         LazyColumn(
@@ -276,10 +276,7 @@ fun HomePage(
                         modifier = Modifier
                             .fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
-
-
                         ) {
-
                         for (i in item.indices) {
                             Box(
                                 modifier = Modifier
@@ -326,7 +323,6 @@ fun HomePage(
         exit = shrinkVertically(animationSpec = tween(durationMillis = 900)),
         modifier = Modifier
             .fillMaxWidth()
-            .windowInsetsPadding(WindowInsets.statusBars)
             .padding(horizontal = 16.dp)
     ) {
         Row(

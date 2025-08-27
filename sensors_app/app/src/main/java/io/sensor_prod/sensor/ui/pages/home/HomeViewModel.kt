@@ -284,7 +284,7 @@ class HomeViewModel : ViewModel() {
         writer = BufferedWriter(FileWriter(file, true))
         csvFile = file
         if (isNew) {
-            val header = StringBuilder("Date,Time,SensorType")
+            val header = StringBuilder("Time,SensorType")
             var maxAxisCount = 3
             for (i in 0 until SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.size) {
                 val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.valueAt(i)
@@ -328,13 +328,13 @@ class HomeViewModel : ViewModel() {
             val now = System.currentTimeMillis()
             rotateIfNeeded(now)
 
-            val dateStr = dateFormatterIST.format(Date(now))
+            // Only time is logged; date is already in the file name
             val timeStr = timeFormatterIST.format(Date(now))
             val sensorName = SensorsConstants.MAP_TYPE_TO_NAME[sensorType] ?: "Unknown"
             val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT[sensorType]
 
             val csvLine = StringBuilder()
-            csvLine.append("$dateStr,$timeStr,$sensorName")
+            csvLine.append("$timeStr,$sensorName")
             for (i in 0 until axisCount) {
                 val v = if (i < values.size) String.format(Locale.US, "%.6f", values[i]) else ""
                 csvLine.append(",").append(v)
@@ -526,4 +526,3 @@ class HomeViewModel : ViewModel() {
         }
     }
 }
-
