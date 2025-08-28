@@ -76,7 +76,7 @@ fun SensorPage(
     Scaffold(
         topBar = {
 
-            SmallTopAppBar(
+            TopAppBar(
 
 //            backgroundColor = Color.Transparent,
                 colors = if (lazyListState.firstVisibleItemIndex > 0) TopAppBarDefaults.mediumTopAppBarColors(
@@ -175,7 +175,6 @@ fun SensorPage(
         LazyColumn(
 
             modifier = Modifier
-                .consumedWindowInsets(it)
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(

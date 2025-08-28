@@ -3,7 +3,6 @@ package io.sensor_prod.sensor.ui.pages.home
 import android.annotation.SuppressLint
 import android.content.ContentValues
 import android.content.Context
-import android.graphics.Bitmap
 import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
@@ -15,14 +14,12 @@ import android.provider.MediaStore
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.camera.video.FileOutputOptions
-import androidx.camera.video.MediaStoreOutputOptions
 import androidx.camera.video.PendingRecording
 import androidx.camera.video.Recorder
 import androidx.camera.video.Recording
 import androidx.camera.video.VideoCapture
 import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.edit
-import androidx.core.util.Consumer
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -43,25 +40,18 @@ class CameraViewModel : ViewModel() {
     var isRecording = false
     private lateinit var videoCapture: VideoCapture<Recorder>
     private var recording: Recording? = null
-    // Use a single-thread executor to reduce scheduling overhead and ensure ordering
     private val executor = Executors.newSingleThreadExecutor()
     @SuppressLint("StaticFieldLeak")
     private lateinit var context: Context
     private var isTriggerRecordingInProgress = false
 
-    // MediaStore paths and ring buffer (RELATIVE_PATH expects a trailing slash)
-    // private val CLIPS_RELATIVE_PATH = "Movies/sensors_clips/"
     private val TRIGGERS_RELATIVE_PATH = "Movies/trigger_recordings/"
-    // private val FRAMES_RELATIVE_PATH = "Pictures/trigger_frames/"
-    private val RING_CAPACITY = 6
+    private val RING_CAPACITY = 5
 
-    // IST formatter for filenames
     private val tzIST: TimeZone = TimeZone.getTimeZone("Asia/Kolkata")
     private val tsFormatter = SimpleDateFormat("yyyy-MM-dd-HH-mm-ss.SSS", Locale.US).apply { timeZone = tzIST }
 
-    // Utility functions
     fun initialize(context: Context, videoCapture: VideoCapture<Recorder>) {
-        // Hold application context to avoid leaks
         this.context = context.applicationContext
         this.videoCapture = videoCapture
         ensureClipsDir().mkdirs()
@@ -74,12 +64,10 @@ class CameraViewModel : ViewModel() {
 
     fun startRecordingClips() {
         if (isClipping) {
-            // Stop clipping
             isClipping = false
             clippingJob?.cancel()
             stopRecording()
         } else {
-            // Start clipping using precise 1s segments: wait for Start -> delay -> Stop -> wait Finalize
             isClipping = true
             clippingJob = viewModelScope.launch {
                 while (isActive && isClipping) {
@@ -87,7 +75,6 @@ class CameraViewModel : ViewModel() {
                         recordSegment(durationMs = 1000L)
                     } catch (e: Exception) {
                         Log.e("CameraViewModel", "Segment error", e)
-                        // Small backoff to avoid tight loop on repeated errors
                         delay(100)
                     }
                 }
@@ -151,6 +138,7 @@ class CameraViewModel : ViewModel() {
                     put(MediaStore.Video.Media.DISPLAY_NAME, triggerName)
                     put(MediaStore.Video.Media.RELATIVE_PATH, TRIGGERS_RELATIVE_PATH)
                     put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                    put(MediaStore.Video.Media.DATE_TAKEN, System.currentTimeMillis())
                 }
                 val destUri = context.contentResolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, cv)
                 if (destUri != null) {
@@ -212,7 +200,13 @@ class CameraViewModel : ViewModel() {
                         buffer.clear()
                         val size = extractor.readSampleData(buffer, 0)
                         if (size < 0) { eos = true } else {
-                            info.size = size; info.offset = 0; info.flags = extractor.sampleFlags
+                            info.size = size; info.offset = 0
+                            // Map MediaExtractor sample flags to MediaCodec.BufferInfo flags
+                            val sampleFlags = extractor.sampleFlags
+                            info.flags = when {
+                                (sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0 -> MediaCodec.BUFFER_FLAG_KEY_FRAME
+                                else -> 0
+                            }
                             val pts = extractor.sampleTime
                             info.presentationTimeUs = (if (pts > 0) pts else 0) + timeOffsetUs
                             muxer.writeSampleData(videoTrackIndex, buffer, info)
@@ -228,7 +222,8 @@ class CameraViewModel : ViewModel() {
                         buffer.clear()
                         val size = extractor.readSampleData(buffer, 0)
                         if (size < 0) { eos = true } else {
-                            info.size = size; info.offset = 0; info.flags = extractor.sampleFlags
+                            info.size = size; info.offset = 0
+                            info.flags = 0 // audio frames do not require keyframe flag
                             val pts = extractor.sampleTime
                             info.presentationTimeUs = (if (pts > 0) pts else 0) + timeOffsetUs
                             muxer.writeSampleData(audioTrackIndex, buffer, info)
@@ -246,20 +241,12 @@ class CameraViewModel : ViewModel() {
 
     private fun estimateDurationUs(file: File): Long {
         return try {
-            val mmr = android.media.MediaMetadataRetriever()
+            val mmr = MediaMetadataRetriever()
             mmr.setDataSource(file.absolutePath)
-            val dMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 1000L
+            val dMs = mmr.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 1000L
             mmr.release(); dMs * 1000L
         } catch (e: Exception) { 1_000_000L }
     }
-
-    // Remove frame extraction, image saving, and MediaStore-based ring helpers
-    // private fun extractFramesFromClips(...) { }
-    // private fun saveFrameBitmap(...) { }
-    // private fun queryLatestClipUris(...) { }
-    // private fun findVideoUriByName(...) { }
-    // private fun captureVideo(...) { }
-    // private fun startRecording() { }
 
     private fun stopRecording() { recording?.stop(); recording = null }
 
