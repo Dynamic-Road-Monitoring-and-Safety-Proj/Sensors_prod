@@ -1,6 +1,6 @@
 package io.sensor_prod.sensor.ui.pages.home
 
-import android.annotation.SuppressLint
+import android.Manifest
 import android.content.Context
 import android.hardware.Sensor
 import android.hardware.SensorEvent
@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Environment
 import android.util.Log
 import androidx.annotation.RequiresApi
+import androidx.annotation.RequiresPermission
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.ViewModel
@@ -22,68 +23,38 @@ import io.sensor_prod.sensor.domains.sensors.packets.SensorPacketsProvider
 import io.sensor_prod.sensor.domains.sensors.provider.SensorsProvider
 import io.sensor_prod.sensor.ui.pages.home.model.ModelHomeSensor
 import io.sensor_prod.sensor.ui.pages.home.state.HomeUiState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.io.BufferedWriter
 import java.io.File
 import java.io.FileWriter
-import androidx.core.util.size
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import org.tensorflow.lite.Interpreter
-import java.io.FileInputStream
-import java.nio.MappedByteBuffer
-import java.nio.channels.FileChannel
-import kotlin.math.abs
-import kotlin.math.pow
 import kotlin.math.sqrt
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+// BLE
+import android.bluetooth.BluetoothAdapter
+import android.bluetooth.BluetoothDevice
+import android.bluetooth.BluetoothSocket
+import java.io.InputStream
+import java.io.IOException
+import java.util.UUID
 
 
 class HomeViewModel : ViewModel() {
-
-//    private var mLogTimestamp: Long = 0
 
     private var mSensors: MutableList<ModelHomeSensor> = mutableListOf()
     private var lastDetectionTime = 0L
     private val cooldownMillis = 5000L // 5 seconds
 
-
-    // Prophet vars
-    private lateinit var interpreter: Interpreter
-    private val buffer = ArrayDeque<Float>()
+    // Adjustable RMS threshold
     private val WINDOW_SIZE = 10
-    private val THRESH_MULTIPLIER = 2f
-    private var threshold = 0f
-    private val errorBuffer = mutableListOf<Float>()
-
-    fun initModel(context: Context) {
-        val model = loadModelFile(context, "model_rms.tflite")
-        interpreter = Interpreter(model)
-    }
-
-    private fun loadModelFile(context: Context, modelName: String): MappedByteBuffer {
-        val assetFileDescriptor = context.assets.openFd(modelName)
-        val inputStream = FileInputStream(assetFileDescriptor.fileDescriptor)
-        val fileChannel = inputStream.channel
-        return fileChannel.map(
-            FileChannel.MapMode.READ_ONLY,
-            assetFileDescriptor.startOffset,
-            assetFileDescriptor.declaredLength
-        )
-    }
-    fun startMonitoringSensors() {
-        viewModelScope.launch {
-            while (isActive) {
-                checkPotholeFromSensors()
-                delay(500L)
-            }
-        }
-    }
-
+    val thresholdFlow = MutableStateFlow(4f)
+    fun setThreshold(value: Float) { thresholdFlow.value = value }
 
     private val gyroscopeValues = mutableListOf<Float>()
 
@@ -95,21 +66,13 @@ class HomeViewModel : ViewModel() {
                     val x = event.values[0]
                     val y = event.values[1]
                     val z = event.values[2]
-
-                    // Calculate the magnitude of angular velocity
                     val magnitude = sqrt(x * x + y * y + z * z)
-
-                    // Maintain a window of values
-                    if (gyroscopeValues.size >= WINDOW_SIZE) {
-                        gyroscopeValues.removeFirst()
-                    }
+                    if (gyroscopeValues.size >= WINDOW_SIZE) gyroscopeValues.removeFirst()
                     gyroscopeValues.add(magnitude)
-
                     checkPotholeFromSensors()
                 }
             }
         }
-
         override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
     }
 
@@ -124,95 +87,35 @@ class HomeViewModel : ViewModel() {
 
     private fun checkPotholeFromSensors() {
         val now = System.currentTimeMillis()
-        if (now - lastDetectionTime < cooldownMillis) return  // 🚫 Early return if in cooldown
-
+        if (now - lastDetectionTime < cooldownMillis) return
         if (gyroscopeValues.size < WINDOW_SIZE) return
-
-        // Step 1: Calculate RMS
         val rms = sqrt(gyroscopeValues.map { it * it }.average().toFloat())
-
-        // Step 2: Update buffer
-        if (buffer.size >= WINDOW_SIZE) buffer.removeFirst()
-        buffer.addLast(rms)
-
-        if (buffer.size == WINDOW_SIZE) {
-            // Step 3: Prepare input
-            val input = Array(1) { Array(WINDOW_SIZE) { FloatArray(1) } }
-            buffer.forEachIndexed { i, value -> input[0][i][0] = value }
-
-            // Step 4: Run model
-            val output = Array(1) { FloatArray(1) }
-            interpreter.run(input, output)
-
-            val predicted = output[0][0]
-            val error = abs(predicted - rms)
-
-            // Step 5: Threshold logic
-            updateThreshold(error)
-            val potholeDetected = error > threshold
-
-            if (potholeDetected) {
-                lastDetectionTime = now  // ✅ Cooldown begins now
-                _potholeDetected.value = true
-
-                Log.d("POTHOLE", "Anomaly Detected! Predicted=$predicted, RMS=$rms, Error=$error, Threshold=$threshold")
-            } else {
-                _potholeDetected.value = false
-            }
+        val pothole = rms > thresholdFlow.value
+        if (pothole) {
+            lastDetectionTime = now
+            _potholeDetected.value = true
+            Log.d("POTHOLE", "RMS threshold exceeded. RMS=$rms, threshold=${thresholdFlow.value}")
+        } else {
+            _potholeDetected.value = false
         }
-    }
-
-    private fun updateThreshold(latestError: Float) {
-        errorBuffer.add(latestError)
-        if (errorBuffer.size > 100) errorBuffer.removeAt(0)
-
-        val mean = errorBuffer.average().toFloat()
-        val std = sqrt(errorBuffer.map { (it - mean).pow(2) }.average().toFloat())
-        threshold = mean + THRESH_MULTIPLIER * std
     }
 
     // Game UI state
     private val _uiState = MutableStateFlow(HomeUiState())
-
-    // Backing property to avoid state updates from other classes
     val mUiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
-
-    /* private val _uiPagerState = MutableStateFlow(HomeUiState())
-     // Backing property to avoid state updates from other classes
-     val mUiPagerState: StateFlow<HomeUiState> = _uiPagerState.asStateFlow()
- */
 
     private val _mSensorsList = mutableStateListOf<ModelHomeSensor>()
     val mSensorsList: SnapshotStateList<ModelHomeSensor> = _mSensorsList
 
-  /*  private val _mUiCurrentSensorState = MutableStateFlow<ModelHomeSensor?>(null)
-    val mUiCurrentSensorState: StateFlow<ModelHomeSensor?> = _mUiCurrentSensorState.asStateFlow()
-*/
-
-
-
-    private val _mActiveSensorListFlow = MutableStateFlow<MutableList<ModelHomeSensor>>(
-        mutableListOf()
-    )
+    private val _mActiveSensorListFlow = MutableStateFlow<MutableList<ModelHomeSensor>>(mutableListOf())
     val mActiveSensorListFlow: StateFlow<MutableList<ModelHomeSensor>> = _mActiveSensorListFlow
     private val _mActiveSensorList = mutableListOf<ModelHomeSensor>()
 
-    private val mIsActiveMap = mutableMapOf<Int, Boolean>(
-        Pair(Sensor.TYPE_GYROSCOPE, true),
-    )
-
-    //    TODO use this in future private val mSensorPacketsMap = mutableMapOf<Int, ModelSensorPacket>()
+    private val mIsActiveMap = mutableMapOf<Int, Boolean>(Pair(Sensor.TYPE_GYROSCOPE, true))
     private val mChartDataManagerMap = mutableMapOf<Int, MpChartDataManager>()
 
-  /*  private val _mSensorPacketFlow = MutableSharedFlow<ModelChartUiUpdate>(replay = 0)
-    val mSensorPacketFlow = _mSensorPacketFlow.asSharedFlow()
-*/
-
     init {
-//        Log.d("HomeViewModel", "viewmodel init")
-
         viewModelScope.launch {
-            startMonitoringSensors()
             SensorsProvider.getInstance().mSensorsFlow.map { value ->
                 value.map {
                     ModelHomeSensor(
@@ -225,42 +128,22 @@ class HomeViewModel : ViewModel() {
                 }.toMutableList()
             }.collectLatest {
                 mSensors = it
-//                Log.d("HomeViewModel","${this@HomeViewModel} init sensors active  1: $mIsActiveMap")
-
-//                Log.d("HomeViewModel", "sensors 2: $it")
                 if (_mSensorsList.size == 0) {
                     _mSensorsList.addAll(mSensors)
-                    var activeSensors = it.filter { modelHomeSensor -> modelHomeSensor.isActive }
-//                     _mActiveSensorStateList.addAll(activeSensors)
+                    val activeSensors = it.filter { modelHomeSensor -> modelHomeSensor.isActive }
                     _mActiveSensorList.addAll(activeSensors)
                     _mActiveSensorListFlow.emit(_mActiveSensorList)
                     getInitialChartData()
                     initializeFlow()
                 }
-
             }
-
         }
-//        Log.d("HomeViewModel", "viewmodel init 2")
         SensorsProvider.getInstance().listenSensors()
-
-
-        /*
-        TODO use this for packets
-        SensorPacketsProvider.getInstance().mSensorPacketFlow.map { value ->
-            mSensorPacketsMap.put(value.type, value)
-        }*/
     }
 
-    private fun getInitialChartData() {
-        for (sensor in _mActiveSensorList) {
-//            Log.d("HomeViewModel", "getInitialChartData")
-            getChartDataManager(sensor.type)
-        }
-    }
+    private fun getInitialChartData() { for (sensor in _mActiveSensorList) { getChartDataManager(sensor.type) } }
 
-    // Logging to CSV
-
+    // Logging to CSV (sensors)
     private var csvFile: File? = null
     private var writer: BufferedWriter? = null
     private var isLogging = MutableStateFlow(false)
@@ -275,7 +158,6 @@ class HomeViewModel : ViewModel() {
         if (!folder.exists()) folder.mkdirs()
         return folder
     }
-
     private fun fileForDate(dateStr: String): File = File(baseCsvDir(), "sensor_data_${dateStr}.csv")
 
     private fun openWriterForDate(dateStr: String) {
@@ -286,7 +168,7 @@ class HomeViewModel : ViewModel() {
         if (isNew) {
             val header = StringBuilder("Time,SensorType")
             var maxAxisCount = 3
-            for (i in 0 until SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.size) {
+            for (i in 0 until SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.size()) {
                 val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.valueAt(i)
                 if (axisCount > maxAxisCount) maxAxisCount = axisCount
             }
@@ -300,39 +182,23 @@ class HomeViewModel : ViewModel() {
     private fun rotateIfNeeded(nowMs: Long) {
         val today = dateFormatterIST.format(Date(nowMs))
         if (currentDateString == null || currentDateString != today || writer == null) {
-            // Close old
             try { writer?.flush(); writer?.close() } catch (_: Exception) {}
-            // Open new
             currentDateString = today
             openWriterForDate(today)
         }
     }
 
-    private fun startCsvLogging() {
-        // Initialize for today
-        val now = System.currentTimeMillis()
-        rotateIfNeeded(now)
-        isLogging.value = true
-    }
-
-    private fun stopCsvLogging() {
-        isLogging.value = false
-        try { writer?.flush(); writer?.close() } catch (_: Exception) {}
-        writer = null
-        csvFile = null
-        Log.d("CSV", "Logging Stopped")
-    }
+    private fun startCsvLogging() { val now = System.currentTimeMillis(); rotateIfNeeded(now); isLogging.value = true }
+    private fun stopCsvLogging() { isLogging.value = false; try { writer?.flush(); writer?.close() } catch (_: Exception) {}; writer = null; csvFile = null; Log.d("CSV", "Logging Stopped") }
+    fun toggleCsvLogging() { if (isLogging.value) stopCsvLogging() else startCsvLogging() }
 
     private fun logSensorData(sensorType: Int, values: FloatArray?) {
         if (isLogging.value && values != null) {
             val now = System.currentTimeMillis()
             rotateIfNeeded(now)
-
-            // Only time is logged; date is already in the file name
             val timeStr = timeFormatterIST.format(Date(now))
             val sensorName = SensorsConstants.MAP_TYPE_TO_NAME[sensorType] ?: "Unknown"
             val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT[sensorType]
-
             val csvLine = StringBuilder()
             csvLine.append("$timeStr,$sensorName")
             for (i in 0 until axisCount) {
@@ -340,189 +206,168 @@ class HomeViewModel : ViewModel() {
                 csvLine.append(",").append(v)
             }
             csvLine.append("\n")
-
             writer?.write(csvLine.toString())
         }
     }
 
-    fun toggleCsvLogging() {
-        if (isLogging.value) stopCsvLogging() else startCsvLogging()
-    }
-
     private fun initializeFlow() {
-
-        var sensorPacketFlow =
-            SensorPacketsProvider.getInstance().mSensorPacketFlow
-
-        for (sensor in _mActiveSensorList) {
-            attachPacketListener(sensor);
-        }
-
-
-        viewModelScope.launch {
-            sensorPacketFlow.collect {
-//                    Log.d("SensorViewModel", "init mSensorPacketFlow 2: ")
-//                    Log.d("SensorViewModel", "addEntry: ${it.timestamp}")
-
-                /* if( it.timestamp - mLogTimestamp < 50){
-                     Log.d("SensorViewModel", "addEntry: ${it.timestamp}")
-
-                 }*/
-
-//                mLogTimestamp = it.timestamp
-                logSensorData(it.type, it.values)
-                mChartDataManagerMap[it.type]?.addEntry(it)
-//                mChartDataManager?.addEntry(it)
-            }
-        }
-
-
-//        Log.d("HomeViewModel", "map size: ${mChartDataManagerMap.size}")
-        mChartDataManagerMap.forEach { (_, mpChartDataManager) ->
-            viewModelScope.launch {
-                mpChartDataManager.runPeriodically()
-//                Log.d("HomeViewModel", "map size 2222: ${mChartDataManagerMap.size}")
-
-                /*   mpChartDataManager.mSensorPacketFlow.collect {
-
-   //                Log.d("SensorViewModel", "init mSensorPacketFlow: ${it.timestamp} ${it.size} ")
-                       _mSensorPacketFlow.emit(it)
-                   }*/
-            }
-            /* for (chartDataManager in mChartDataManagerMap.values.iterator()) {
-
-             }*/
-
-        }
+        val sensorPacketFlow = SensorPacketsProvider.getInstance().mSensorPacketFlow
+        for (sensor in _mActiveSensorList) { attachPacketListener(sensor) }
+        viewModelScope.launch { sensorPacketFlow.collect { logSensorData(it.type, it.values); mChartDataManagerMap[it.type]?.addEntry(it) } }
+        mChartDataManagerMap.forEach { (_, mpChartDataManager) -> viewModelScope.launch { mpChartDataManager.runPeriodically() } }
     }
 
-    private fun attachPacketListener(sensor: ModelHomeSensor) {
-
-//        Log.d("HomeViewModel", "attachPacketListener: $sensor")
-        SensorPacketsProvider.getInstance().attachSensor(
-            SensorPacketConfig(sensor.type, SensorManager.SENSOR_DELAY_NORMAL)
-        )
-    }
-
-    private fun detachPacketListener(sensor: ModelHomeSensor) {
-        SensorPacketsProvider.getInstance().detachSensor(
-            sensor.type
-        )
-    }
+    private fun attachPacketListener(sensor: ModelHomeSensor) { SensorPacketsProvider.getInstance().attachSensor(SensorPacketConfig(sensor.type, SensorManager.SENSOR_DELAY_NORMAL)) }
+    private fun detachPacketListener(sensor: ModelHomeSensor) { SensorPacketsProvider.getInstance().detachSensor(sensor.type) }
 
     fun onSensorChecked(type: Int, isChecked: Boolean) {
-        var isCheckedPrev = mIsActiveMap.getOrDefault(type, false)
-
-        if (isCheckedPrev != isChecked) {
-            mIsActiveMap[type] = isChecked
-        }
-
-        var index = mSensors.indexOfFirst { it.type == type }
+        val isCheckedPrev = mIsActiveMap.getOrDefault(type, false)
+        if (isCheckedPrev != isChecked) mIsActiveMap[type] = isChecked
+        val index = mSensors.indexOfFirst { it.type == type }
         if (index >= 0) {
-            var sensor = mSensors[index]
-            var updatedSensor =
-                ModelHomeSensor(sensor.type, sensor.sensor, sensor.info, sensor.valueRms, isChecked)
+            val sensor = mSensors[index]
+            val updatedSensor = ModelHomeSensor(sensor.type, sensor.sensor, sensor.info, sensor.valueRms, isChecked)
             mSensors[index] = updatedSensor
-
             mSensorsList[index] = updatedSensor
             updateActiveSensor(updatedSensor, isChecked)
-
         }
     }
 
     private fun updateActiveSensor(sensor: ModelHomeSensor, isChecked: Boolean = false) {
-        var index = _mActiveSensorList.indexOfFirst { it.type == sensor.type }
-
+        val index = _mActiveSensorList.indexOfFirst { it.type == sensor.type }
         if (!isChecked && index >= 0) {
-            var manager = mChartDataManagerMap.remove(sensor.type)
+            val manager = mChartDataManagerMap.remove(sensor.type)
             manager?.destroy()
-//            _mActiveSensorStateList.removeAt(index)
             detachPacketListener(sensor)
-
-
             _mActiveSensorList.removeAt(index)
-            viewModelScope.launch {
-
-                _mActiveSensorListFlow.emit(_mActiveSensorList)
-            }
-
+            viewModelScope.launch { _mActiveSensorListFlow.emit(_mActiveSensorList) }
         } else if (isChecked && index < 0) {
-//            _mActiveSensorStateList.add(sensor)
-
             _mActiveSensorList.add(sensor)
             attachPacketListener(sensor)
-            viewModelScope.launch {
-
-                _mActiveSensorListFlow.emit(_mActiveSensorList)
-            }
+            viewModelScope.launch { _mActiveSensorListFlow.emit(_mActiveSensorList) }
             getChartDataManager(type = sensor.type).runPeriodically()
         }
     }
 
-
     fun getChartDataManager(type: Int): MpChartDataManager {
-        var chartDataManager = mChartDataManagerMap.getOrPut(type, defaultValue = {
-            MpChartDataManager(type, onDestroy = {
-            })
-        })
+        val chartDataManager = mChartDataManagerMap.getOrPut(type, defaultValue = { MpChartDataManager(type, onDestroy = { }) })
         Log.d("HomeViewModel", "getChartDataManager: $type")
         return chartDataManager
     }
 
-
-
     fun setActivePage(page: Int?) {
-
         viewModelScope.launch {
-//            Log.d("HomeViewModel", "page: $page")
             if (page != null && _mActiveSensorList.size > 0) {
                 if(_mActiveSensorList.size > page){
-                    var sensor = _mActiveSensorList[page]
-//                _mUiCurrentSensorState.emit(sensor)
-                    _uiState.emit(
-                        _uiState.value.copy(
-                            currentSensor = sensor,
-                            activeSensorCounts = _mActiveSensorList.size
-                        )
-                    )
+                    val sensor = _mActiveSensorList[page]
+                    _uiState.emit(_uiState.value.copy(currentSensor = sensor, activeSensorCounts = _mActiveSensorList.size))
                 }else{
-                    var sensor = _mActiveSensorList[_mActiveSensorList.size-1]
-                    _uiState.emit(
-                        _uiState.value.copy(
-                            currentSensor = sensor,
-                            activeSensorCounts = _mActiveSensorList.size
-                        )
-                    )
+                    val sensor = _mActiveSensorList[_mActiveSensorList.size-1]
+                    _uiState.emit(_uiState.value.copy(currentSensor = sensor, activeSensorCounts = _mActiveSensorList.size))
                 }
-
             } else {
-//                _mUiCurrentSensorState.emit(null)
-                _uiState.emit(
-                    _uiState.value.copy(
-                        currentSensor = null,
-                        activeSensorCounts = _mActiveSensorList.size
-                    )
-                )
-
+                _uiState.emit(_uiState.value.copy(currentSensor = null, activeSensorCounts = _mActiveSensorList.size))
             }
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-
-//        Log.d("HomeViewModel", "onCleared")
+        // Close BLE on clear
+        disconnectBle()
         mChartDataManagerMap.forEach { (_, mpChartDataManager) -> mpChartDataManager.destroy() }
     }
 
-    private var isRecording = MutableStateFlow(false)
+    // ===== BLE integration (migrated) =====
+    val bleConnectedDevice = MutableStateFlow<BluetoothDevice?>(null)
+    private var bleSocket: BluetoothSocket? = null
+    private var bleReceiverJob: Job? = null
+    val bleLogging = MutableStateFlow(false)
 
+    private var bleWriter: BufferedWriter? = null
+    private var bleCurrentDateString: String? = null
+    private fun bleFileForDate(dateStr: String): File = File(baseCsvDir(), "bluetooth_data_${dateStr}.csv")
+    private fun bleOpenWriterForDate(dateStr: String) {
+        val file = bleFileForDate(dateStr)
+        val isNew = !file.exists()
+        bleWriter = BufferedWriter(FileWriter(file, true))
+        if (isNew) { bleWriter?.write("Time,Data\n") }
+    }
+    private fun bleRotateIfNeeded(nowMs: Long) {
+        val today = dateFormatterIST.format(Date(nowMs))
+        if (bleCurrentDateString == null || bleCurrentDateString != today || bleWriter == null) {
+            try { bleWriter?.flush(); bleWriter?.close() } catch (_: Exception) {}
+            bleCurrentDateString = today
+            bleOpenWriterForDate(today)
+        }
+    }
 
+    fun toggleBleLogging() { bleLogging.value = !bleLogging.value }
 
-    @Suppress("UNCHECKED_CAST")
-    class Factory() : ViewModelProvider.Factory {
-        override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return HomeViewModel() as T
+    @RequiresPermission(Manifest.permission.BLUETOOTH_CONNECT)
+    fun connectBle(device: BluetoothDevice, onError: ((Exception) -> Unit)? = null) {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // Close any previous
+                disconnectBle()
+                val socket = device.createRfcommSocketToServiceRecord(UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"))
+                socket.connect()
+                bleSocket = socket
+                bleConnectedDevice.emit(device)
+                bleReceiverJob = launch(Dispatchers.IO) { receiveBleData(socket) }
+            } catch (e: Exception) {
+                onError?.invoke(e as? Exception ?: RuntimeException("BLE error"))
+            }
+        }
+    }
+
+    fun disconnectBle() {
+        try { bleReceiverJob?.cancel() } catch (_: Exception) {}
+        bleReceiverJob = null
+        try { bleSocket?.close() } catch (_: Exception) {}
+        bleSocket = null
+        viewModelScope.launch { bleConnectedDevice.emit(null) }
+        try { bleWriter?.flush(); bleWriter?.close() } catch (_: Exception) {}
+        bleWriter = null
+        bleCurrentDateString = null
+    }
+
+    private suspend fun receiveBleData(socket: BluetoothSocket) {
+        try {
+            val input: InputStream = socket.inputStream
+            val buffer = ByteArray(1024)
+            var carry = ""
+            while (true) {
+                val bytesRead = input.read(buffer)
+                if (bytesRead <= 0) continue
+                val chunk = String(buffer, 0, bytesRead)
+                val combined = carry + chunk
+                val lines = combined.split('\n')
+                for (i in 0 until lines.size - 1) { handleBleLine(lines[i].trim()) }
+                carry = lines.last()
+            }
+        } catch (e: IOException) {
+            Log.e("BLE", "receive error: ${e.message}")
+        }
+    }
+
+    private fun handleBleLine(line: String) {
+        if (line.isEmpty()) return
+        if (bleLogging.value) {
+            val now = System.currentTimeMillis()
+            bleRotateIfNeeded(now)
+            val timeStr = timeFormatterIST.format(Date(now))
+            try { bleWriter?.write("$timeStr,$line\n") } catch (e: Exception) { Log.e("BLE", "write fail: ${e.message}") }
+        }
+    }
+
+    companion object {
+        // Simple factory so callers can use: viewModel(factory = HomeViewModel.Factory)
+        val Factory: ViewModelProvider.Factory = object : ViewModelProvider.Factory {
+            @Suppress("UNCHECKED_CAST")
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                return HomeViewModel() as T
+            }
         }
     }
 }

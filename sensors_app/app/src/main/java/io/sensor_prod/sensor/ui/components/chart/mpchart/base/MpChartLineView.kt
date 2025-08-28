@@ -1,7 +1,6 @@
 package io.sensor_prod.sensor.ui.components.chart.mpchart.base
 
 import android.content.Context
-import android.view.View
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import com.github.mikephil.charting.charts.LineChart
@@ -17,11 +16,7 @@ open class MpChartLineView(var mKey: Int) : IMpChartLineView {
     override fun create(context: Context, colorSurface: Color, colorOnSurface: Color): LineChart {
         mLineChart = LineChart(context).apply {
 
-            //Set shadow
-            setLayerType(View.LAYER_TYPE_SOFTWARE, null);
-//            renderer.paintRender.setShadowLayer(3F, 5F, 3F, Color.Gray.toArgb());
-//            setViewPortOffsets(0f, 0f, 0f, 0f);
-
+            // Use default (hardware-accelerated) layer to avoid Compose RenderNode crash
 
             applyAxis(this, colorSurface, colorOnSurface)
             legend.isEnabled = true
