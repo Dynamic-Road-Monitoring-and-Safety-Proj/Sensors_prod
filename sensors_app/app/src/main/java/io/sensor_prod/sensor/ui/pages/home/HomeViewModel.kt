@@ -43,6 +43,13 @@ import android.bluetooth.BluetoothSocket
 import java.io.InputStream
 import java.io.IOException
 import java.util.UUID
+// Location
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.os.Looper
+import androidx.core.content.ContextCompat
+import android.content.pm.PackageManager
 
 
 class HomeViewModel : ViewModel() {
@@ -151,6 +158,52 @@ class HomeViewModel : ViewModel() {
     private val tzIST: TimeZone = TimeZone.getTimeZone("Asia/Kolkata")
     private val dateFormatterIST = SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { timeZone = tzIST }
     private val timeFormatterIST = SimpleDateFormat("HH:mm:ss.SSS", Locale.US).apply { timeZone = tzIST }
+    private var maxAxisCountCached: Int = 3
+
+    // Location tracking for CSV enrichment
+    private var locationManager: LocationManager? = null
+    private var locationListener: LocationListener? = null
+    @Volatile private var currentLatitude: Double? = null
+    @Volatile private var currentLongitude: Double? = null
+
+    fun startLocationListening(context: Context) {
+        try {
+            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED
+            ) {
+                // No runtime permission; skip. Caller should request permission.
+                return
+            }
+            val lm = context.getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            locationManager = lm
+            // Initial last known
+            val last: Location? = lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
+            if (last != null) {
+                currentLatitude = last.latitude
+                currentLongitude = last.longitude
+            }
+            // Listener
+            val listener = LocationListener { loc ->
+                currentLatitude = loc.latitude
+                currentLongitude = loc.longitude
+            }
+            locationListener = listener
+            // Request from both providers where available
+            try { lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, listener, Looper.getMainLooper()) } catch (_: Exception) {}
+            try { lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 2000L, 0f, listener, Looper.getMainLooper()) } catch (_: Exception) {}
+        } catch (e: Exception) {
+            Log.e("Location", "Failed to start location updates: ${e.message}")
+        }
+    }
+
+    private fun stopLocationListening() {
+        try {
+            locationManager?.let { lm -> locationListener?.let { ll -> lm.removeUpdates(ll) } }
+        } catch (_: Exception) {}
+        locationListener = null
+        locationManager = null
+    }
 
     private fun baseCsvDir(): File {
         val docs = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS)
@@ -172,9 +225,20 @@ class HomeViewModel : ViewModel() {
                 val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.valueAt(i)
                 if (axisCount > maxAxisCount) maxAxisCount = axisCount
             }
+            maxAxisCountCached = maxAxisCount
             for (i in 0 until maxAxisCount) header.append(",Value${i + 1}")
+            // New enrichment columns
+            header.append(",Latitude,Longitude,Pothole")
             header.append("\n")
             writer?.write(header.toString())
+        } else {
+            // Ensure cached max is computed for existing files/environment
+            var maxAxisCount = 3
+            for (i in 0 until SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.size()) {
+                val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT.valueAt(i)
+                if (axisCount > maxAxisCount) maxAxisCount = axisCount
+            }
+            maxAxisCountCached = maxAxisCount
         }
         Log.d("CSV", "Logging to: ${file.absolutePath}")
     }
@@ -201,10 +265,18 @@ class HomeViewModel : ViewModel() {
             val axisCount = SensorsConstants.MAP_TYPE_TO_AXIS_COUNT[sensorType]
             val csvLine = StringBuilder()
             csvLine.append("$timeStr,$sensorName")
-            for (i in 0 until axisCount) {
-                val v = if (i < values.size) String.format(Locale.US, "%.6f", values[i]) else ""
+            // Write up to maxAxisCountCached columns, padding blanks as needed
+            for (i in 0 until maxAxisCountCached) {
+                val v = if (i < axisCount && i < values.size) String.format(Locale.US, "%.6f", values[i]) else ""
                 csvLine.append(",").append(v)
             }
+            // Append location and pothole flag
+            val lat = currentLatitude
+            val lon = currentLongitude
+            val latStr = lat?.let { String.format(Locale.US, "%.6f", it) } ?: ""
+            val lonStr = lon?.let { String.format(Locale.US, "%.6f", it) } ?: ""
+            val pothole = if (potholeDetected.value) "1" else "0"
+            csvLine.append(",").append(latStr).append(",").append(lonStr).append(",").append(pothole)
             csvLine.append("\n")
             writer?.write(csvLine.toString())
         }
@@ -275,6 +347,8 @@ class HomeViewModel : ViewModel() {
         super.onCleared()
         // Close BLE on clear
         disconnectBle()
+        // Stop location updates
+        stopLocationListening()
         mChartDataManagerMap.forEach { (_, mpChartDataManager) -> mpChartDataManager.destroy() }
     }
 

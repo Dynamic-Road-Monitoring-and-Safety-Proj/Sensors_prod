@@ -83,6 +83,8 @@ fun HomePage(
 
     val context = LocalContext.current
     viewModel.startGyroListening(context)
+    // Start location updates (permission-guarded inside VM)
+    LaunchedEffect(Unit) { viewModel.startLocationListening(context) }
 
     val camVM: CameraViewModel = viewModel(
         factory = CameraViewModel.Factory()
